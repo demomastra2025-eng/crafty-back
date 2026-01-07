@@ -66,39 +66,6 @@ export class N8nController extends BaseChatbotController<N8nModel, N8nDto> {
     await this.cache.hSet(this.promptCacheKey(bot.instanceId), bot.id, payload);
   }
 
-  public async createBot(instance: InstanceDto, data: N8nDto) {
-    const bot = (await super.createBot(instance, data)) as N8nModel;
-    if (bot) {
-      await this.updatePromptFunnelCache(bot);
-    }
-    return this.stripDefaultWebhook(bot);
-  }
-
-  public async updateBot(instance: InstanceDto, botId: string, data: N8nDto) {
-    const current = (await this.botRepository.findFirst({ where: { id: botId } })) as N8nModel | null;
-    const updated = (await super.updateBot(instance, botId, data)) as N8nModel;
-    const promptChanged = data.prompt !== undefined && data.prompt !== current?.prompt;
-    const funnelChanged = data.funnelId !== undefined && data.funnelId !== current?.funnelId;
-
-    if (updated && (promptChanged || funnelChanged)) {
-      await this.updatePromptFunnelCache(updated);
-    }
-
-    return this.stripDefaultWebhook(updated);
-  }
-
-  public async deleteBot(instance: InstanceDto, botId: string) {
-    const bot = (await this.botRepository.findFirst({ where: { id: botId } })) as N8nModel | null;
-    const instanceId = bot?.instanceId;
-    const result = await super.deleteBot(instance, botId);
-
-    if (this.cache && instanceId) {
-      await this.cache.hDelete(this.promptCacheKey(instanceId), botId);
-    }
-
-    return result;
-  }
-
   private getDefaultWebhookUrl(): string | null {
     const url = configService.get('N8N')?.DEFAULT_WEBHOOK_URL || '';
     return url.trim() ? url.trim() : null;
@@ -302,10 +269,15 @@ export class N8nController extends BaseChatbotController<N8nModel, N8nDto> {
     }
 
     // Let the base class handle the rest of the bot creation process
-    return super.createBot(instance, data);
+    const bot = (await super.createBot(instance, data)) as N8nModel;
+    if (bot) {
+      await this.updatePromptFunnelCache(bot);
+    }
+    return this.stripDefaultWebhook(bot);
   }
 
   public async updateBot(instance: InstanceDto, botId: string, data: N8nDto) {
+    const current = (await this.botRepository.findFirst({ where: { id: botId } })) as N8nModel | null;
     const instanceRecord = await this.prismaRepository.instance.findFirst({
       where: { name: instance.instanceName },
       select: { id: true, companyId: true },
@@ -330,7 +302,27 @@ export class N8nController extends BaseChatbotController<N8nModel, N8nDto> {
       data.funnelId = funnelId;
     }
 
-    return super.updateBot(instance, botId, data);
+    const updated = (await super.updateBot(instance, botId, data)) as N8nModel;
+    const promptChanged = data.prompt !== undefined && data.prompt !== current?.prompt;
+    const funnelChanged = data.funnelId !== undefined && data.funnelId !== current?.funnelId;
+
+    if (updated && (promptChanged || funnelChanged)) {
+      await this.updatePromptFunnelCache(updated);
+    }
+
+    return this.stripDefaultWebhook(updated);
+  }
+
+  public async deleteBot(instance: InstanceDto, botId: string) {
+    const bot = (await this.botRepository.findFirst({ where: { id: botId } })) as N8nModel | null;
+    const instanceId = bot?.instanceId;
+    const result = await super.deleteBot(instance, botId);
+
+    if (this.cache && instanceId) {
+      await this.cache.hDelete(this.promptCacheKey(instanceId), botId);
+    }
+
+    return result;
   }
 
   // Process N8n-specific bot logic
