@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { EvolutionRouter } from './evolution/evolution.router';
 import { MetaRouter } from './meta/meta.router';
+import { TelegramRouter } from './telegram/telegram.router';
 import { BaileysRouter } from './whatsapp/baileys.router';
 
 export class ChannelRouter {
@@ -12,6 +13,7 @@ export class ChannelRouter {
 
     this.router.use('/', new EvolutionRouter(configService).router);
     this.router.use('/', new MetaRouter(configService).router);
+    this.router.use('/', new TelegramRouter().router);
     this.router.use('/baileys', new BaileysRouter(...guards).router);
   }
 }

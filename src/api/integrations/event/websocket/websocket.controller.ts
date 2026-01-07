@@ -1,6 +1,7 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
-import { Auth, configService, Cors, Log, Websocket } from '@config/env.config';
+import { hashApiKey } from '@api/utils/api-key';
+import { configService, Cors, Log, Websocket } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { Server } from 'http';
 import { Server as SocketIO } from 'socket.io';
@@ -52,14 +53,14 @@ export class WebsocketController extends EventController implements EventControl
             return callback('apiKey is required', false);
           }
 
-          const instance = await this.prismaRepository.instance.findFirst({ where: { token: apiKey } });
-
-          if (!instance) {
-            const globalToken = configService.get<Auth>('AUTHENTICATION').API_KEY.KEY;
-            if (apiKey !== globalToken) {
-              this.logger.error('Connection rejected: invalid global token');
-              return callback('Invalid global token', false);
-            }
+          const apiKeyHash = hashApiKey(apiKey);
+          const companyKey = await this.prismaRepository.apiKey.findFirst({
+            where: { keyHash: apiKeyHash, revokedAt: null },
+            select: { id: true },
+          });
+          if (!companyKey) {
+            this.logger.error('Connection rejected: invalid api key');
+            return callback('Invalid api key', false);
           }
 
           callback(null, true);

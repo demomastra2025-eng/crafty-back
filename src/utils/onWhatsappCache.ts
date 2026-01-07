@@ -52,7 +52,7 @@ function getAvailableNumbers(remoteJid: string) {
 
   // Other countries
   else {
-    numbersAvailable.push(remoteJid);
+    numbersAvailable.push(number);
   }
 
   // TODO: Adiciona @domain apenas para números que não são @lid

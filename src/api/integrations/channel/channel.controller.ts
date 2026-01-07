@@ -10,6 +10,7 @@ import EventEmitter2 from 'eventemitter2';
 
 import { EvolutionStartupService } from './evolution/evolution.channel.service';
 import { BusinessStartupService } from './meta/whatsapp.business.service';
+import { TelegramBotStartupService } from './telegram/telegram.bot.service';
 import { BaileysStartupService } from './whatsapp/whatsapp.baileys.service';
 
 type ChannelDataType = {
@@ -23,7 +24,7 @@ type ChannelDataType = {
 };
 
 export interface ChannelControllerInterface {
-  receiveWebhook(data: any): Promise<any>;
+  receiveWebhook(data: any, instanceName?: string): Promise<any>;
 }
 
 export class ChannelController {
@@ -52,12 +53,28 @@ export class ChannelController {
   }
 
   public init(instanceData: InstanceDto, data: ChannelDataType) {
-    if (!instanceData.token && instanceData.integration === Integration.WHATSAPP_BUSINESS) {
+    if (
+      !instanceData.token &&
+      (instanceData.integration === Integration.WHATSAPP_BUSINESS ||
+        instanceData.integration === Integration.TELEGRAM_BOT)
+    ) {
       throw new BadRequestException('token is required');
     }
 
     if (instanceData.integration === Integration.WHATSAPP_BUSINESS) {
       return new BusinessStartupService(
+        data.configService,
+        data.eventEmitter,
+        data.prismaRepository,
+        data.cache,
+        data.chatwootCache,
+        data.baileysCache,
+        data.providerFiles,
+      );
+    }
+
+    if (instanceData.integration === Integration.TELEGRAM_BOT) {
+      return new TelegramBotStartupService(
         data.configService,
         data.eventEmitter,
         data.prismaRepository,

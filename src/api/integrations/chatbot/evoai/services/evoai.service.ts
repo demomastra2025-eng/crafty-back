@@ -195,7 +195,7 @@ export class EvoaiService extends BaseChatbotService<Evoai, EvoaiSetting> {
       this.logger.debug(`[EvoAI] Extracted message to send: ${message}`);
 
       if (message) {
-        await this.sendMessageWhatsApp(instance, remoteJid, message, settings, true);
+        await this.sendMessageWhatsApp(instance, remoteJid, message, settings, true, session);
       }
     } catch (error) {
       this.logger.error(

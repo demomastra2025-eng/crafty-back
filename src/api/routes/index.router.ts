@@ -16,6 +16,8 @@ import path from 'path';
 import { BusinessRouter } from './business.router';
 import { CallRouter } from './call.router';
 import { ChatRouter } from './chat.router';
+import { AuthRouter } from './auth.router';
+import { CompanyRouter } from './company.router';
 import { GroupRouter } from './group.router';
 import { InstanceRouter } from './instance.router';
 import { LabelRouter } from './label.router';
@@ -214,6 +216,8 @@ router
       facebookUserToken: facebookConfig.USER_TOKEN,
     });
   })
+  .use('/auth', new AuthRouter().router)
+  .use('/companies', new CompanyRouter().router)
   .use('/instance', new InstanceRouter(configService, ...guards).router)
   .use('/message', new MessageRouter(...guards).router)
   .use('/call', new CallRouter(...guards).router)

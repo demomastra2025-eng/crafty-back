@@ -149,7 +149,7 @@ export class EvolutionBotService extends BaseChatbotService<EvolutionBot, Evolut
 
       if (message) {
         // Use the base class method that handles splitMessages functionality
-        await this.sendMessageWhatsApp(instance, remoteJid, message, settings, linkPreview);
+        await this.sendMessageWhatsApp(instance, remoteJid, message, settings, linkPreview, session);
       } else {
         this.logger.warn(`[EvolutionBot] No message content received from bot response`);
       }

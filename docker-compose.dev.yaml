@@ -1,9 +1,11 @@
 services:
   api:
-    container_name: evolution_api
     image: evolution/api:local
     build: .
     restart: always
+    depends_on:
+      - redis
+      - evolution-postgres
     ports:
       - 8080:8080
     volumes:
@@ -15,18 +17,88 @@ services:
     expose:
       - 8080
 
-  frontend:
-    container_name: evolution_frontend
-    image: evolution/manager:local
-    build: ./evolution-manager-v2
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
     restart: always
     ports:
-      - "3000:80"
+      - "5679:5678"
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_HOST=localhost
+      - N8N_PORT=5679
+      - N8N_PROTOCOL=http
+      - N8N_RUNNERS_ENABLED=true
+      - NODE_ENV=development
+      - WEBHOOK_URL=http://localhost:5679/
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${GENERIC_TIMEZONE}
+    env_file:
+      - .env
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./local-files:/files
+    networks:
+      - evolution-net
+
+  redis:
+    image: redis:latest
+    restart: always
+    command: >
+      redis-server --port 6379 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - evolution_redis:/data
+    networks:
+      - evolution-net
+    expose:
+      - "6379"
+
+  evolution-postgres:
+    image: postgres:15
+    restart: always
+    env_file:
+      - .env
+    command:
+      - postgres
+      - -c
+      - max_connections=1000
+      - -c
+      - listen_addresses=*
+    environment:
+      - POSTGRES_DB=${POSTGRES_DATABASE}
+      - POSTGRES_USER=${POSTGRES_USERNAME}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - evolution-net
+    expose:
+      - "5432"
+
+  minio:
+    image: minio/minio:latest
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
     networks:
       - evolution-net
 
 volumes:
   evolution_instances:
+  evolution_redis:
+  postgres_data:
+  minio_data:
+  n8n_data:
 
 
 networks:

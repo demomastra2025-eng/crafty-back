@@ -318,7 +318,7 @@ export class TypebotService extends BaseChatbotService<TypebotModel, any> {
         } else if (formattedText.includes('[buttons]')) {
           await this.processButtonMessage(instance, formattedText, session.remoteJid);
         } else {
-          await this.sendMessageWhatsApp(instance, session.remoteJid, formattedText, settings, true);
+          await this.sendMessageWhatsApp(instance, session.remoteJid, formattedText, settings, true, session);
         }
 
         sendTelemetry('/message/sendText');
@@ -393,7 +393,7 @@ export class TypebotService extends BaseChatbotService<TypebotModel, any> {
         } else if (formattedText.includes('[buttons]')) {
           await this.processButtonMessage(instance, formattedText, session.remoteJid);
         } else {
-          await this.sendMessageWhatsApp(instance, session.remoteJid, formattedText, settings, true);
+          await this.sendMessageWhatsApp(instance, session.remoteJid, formattedText, settings, true, session);
         }
 
         sendTelemetry('/message/sendText');
@@ -656,6 +656,7 @@ export class TypebotService extends BaseChatbotService<TypebotModel, any> {
                   unknownMessage,
                 },
                 true,
+                session,
               );
               sendTelemetry('/message/sendText');
             }
@@ -821,6 +822,7 @@ export class TypebotService extends BaseChatbotService<TypebotModel, any> {
                 unknownMessage,
               },
               true,
+              session,
             );
             sendTelemetry('/message/sendText');
           }
@@ -929,6 +931,7 @@ export class TypebotService extends BaseChatbotService<TypebotModel, any> {
             unknownMessage,
           },
           true,
+          session,
         );
         sendTelemetry('/message/sendText');
       }

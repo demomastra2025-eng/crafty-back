@@ -1,0 +1,2 @@
+ALTER TABLE `N8n`
+  ADD COLUMN `prompt` TEXT;

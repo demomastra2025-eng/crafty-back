@@ -6,6 +6,7 @@ import { Router } from 'express';
 
 import { EvoaiRouter } from './evoai/routes/evoai.router';
 import { EvolutionBotRouter } from './evolutionBot/routes/evolutionBot.router';
+import { FunnelRouter } from './funnel/routes/funnel.router';
 import { FlowiseRouter } from './flowise/routes/flowise.router';
 import { N8nRouter } from './n8n/routes/n8n.router';
 
@@ -23,5 +24,6 @@ export class ChatbotRouter {
     this.router.use('/flowise', new FlowiseRouter(...guards).router);
     this.router.use('/n8n', new N8nRouter(...guards).router);
     this.router.use('/evoai', new EvoaiRouter(...guards).router);
+    this.router.use('/', new FunnelRouter(...guards).router);
   }
 }

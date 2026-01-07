@@ -36,6 +36,10 @@ export class InstanceController {
 
   public async createInstance(instanceData: InstanceDto) {
     try {
+      if (!instanceData.companyId) {
+        throw new BadRequestException('companyId is required');
+      }
+
       const instance = channelController.init(instanceData, {
         configService: this.configService,
         eventEmitter: this.eventEmitter,
@@ -70,6 +74,7 @@ export class InstanceController {
         number: instanceData.number,
         businessId: instanceData.businessId,
         status: instanceData.status,
+        companyId: instanceData.companyId,
       });
 
       instance.setInstance({
@@ -137,6 +142,7 @@ export class InstanceController {
 
       let webhookWaBusiness = null,
         accessTokenWaBusiness = '';
+      let webhookTelegram = null;
 
       if (instanceData.integration === Integration.WHATSAPP_BUSINESS) {
         if (!instanceData.number) {
@@ -145,6 +151,10 @@ export class InstanceController {
         const urlServer = this.configService.get<HttpServer>('SERVER').URL;
         webhookWaBusiness = `${urlServer}/webhook/meta`;
         accessTokenWaBusiness = this.configService.get<WaBusiness>('WA_BUSINESS').TOKEN_WEBHOOK;
+      }
+      if (instanceData.integration === Integration.TELEGRAM_BOT) {
+        const urlServer = this.configService.get<HttpServer>('SERVER').URL;
+        webhookTelegram = `${urlServer}/webhook/telegram/${encodeURIComponent(instanceData.instanceName)}`;
       }
 
       if (!instanceData.chatwootAccountId || !instanceData.chatwootToken || !instanceData.chatwootUrl) {
@@ -163,6 +173,7 @@ export class InstanceController {
             integration: instanceData.integration,
             webhookWaBusiness,
             accessTokenWaBusiness,
+            webhookTelegram,
             status:
               typeof instance.connectionStatus === 'string'
                 ? instance.connectionStatus
@@ -251,17 +262,18 @@ export class InstanceController {
       }
 
       return {
-        instance: {
-          instanceName: instance.instanceName,
-          instanceId: instanceId,
-          integration: instanceData.integration,
-          webhookWaBusiness,
-          accessTokenWaBusiness,
-          status:
-            typeof instance.connectionStatus === 'string'
-              ? instance.connectionStatus
-              : instance.connectionStatus?.state || 'unknown',
-        },
+          instance: {
+            instanceName: instance.instanceName,
+            instanceId: instanceId,
+            integration: instanceData.integration,
+            webhookWaBusiness,
+            accessTokenWaBusiness,
+            webhookTelegram,
+            status:
+              typeof instance.connectionStatus === 'string'
+                ? instance.connectionStatus
+                : instance.connectionStatus?.state || 'unknown',
+          },
         hash,
         webhook: {
           webhookUrl: instanceData?.webhook?.url,
@@ -399,10 +411,25 @@ export class InstanceController {
     };
   }
 
-  public async fetchInstances({ instanceName, instanceId, number }: InstanceDto, key: string) {
+  public async fetchInstances({ instanceName, instanceId, number, companyId }: InstanceDto, key: string) {
     const env = this.configService.get<Auth>('AUTHENTICATION').API_KEY;
 
     if (env.KEY !== key) {
+      if (companyId) {
+        const instancesByCompany = await this.prismaRepository.instance.findMany({
+          where: {
+            companyId,
+            name: instanceName || undefined,
+            id: instanceId || undefined,
+          },
+        });
+        const names = instancesByCompany.map((instance) => instance.name);
+        if (names.length === 0) {
+          return [];
+        }
+        return this.waMonitor.instanceInfo(names);
+      }
+
       const instancesByKey = await this.prismaRepository.instance.findMany({
         where: {
           token: key,

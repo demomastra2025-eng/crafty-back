@@ -2,6 +2,7 @@ import { InstanceDto } from '@api/dto/instance.dto';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Integration } from '@api/types/wa.types';
+import { setLastInboundKeyId } from '@api/integrations/chatbot/session-cache';
 import { ConfigService } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { IntegrationSession } from '@prisma/client';
@@ -131,6 +132,13 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
         return;
       }
 
+      // If session is closed, ignore the message
+      if (session.status === 'closed') {
+        return;
+      }
+
+      await this.attachSessionToMessage(msg?.key?.id, instance.instanceId, session.id);
+
       // If session is paused, ignore the message
       if (session.status === 'paused') {
         return;
@@ -181,6 +189,9 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     message: string,
     settings: SettingsType,
     linkPreview: boolean = true,
+    session?: IntegrationSession,
+    responseKeyId?: string,
+    followUpMode: boolean = false,
   ): Promise<void> {
     if (!message) return;
 
@@ -203,21 +214,35 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
       if (mediaType) {
         // Send accumulated text before sending media
         if (textBuffer.trim()) {
-          await this.sendFormattedText(instance, remoteJid, textBuffer.trim(), settings, splitMessages, linkPreview);
+          if (!(await this.shouldSendResponse(session, responseKeyId))) return;
+          await this.sendFormattedText(
+            instance,
+            remoteJid,
+            textBuffer.trim(),
+            settings,
+            splitMessages,
+            linkPreview,
+            session,
+            responseKeyId,
+            followUpMode,
+          );
           textBuffer = '';
         }
 
         // Handle sending the media
         try {
+          if (!(await this.shouldSendResponse(session, responseKeyId))) return;
           if (mediaType === 'audio') {
-            await instance.audioWhatsapp({
+            const sent = await instance.audioWhatsapp({
               number: remoteJid.includes('@lid') ? remoteJid : remoteJid.split('@')[0],
               delay: (settings as any)?.delayMessage || 1000,
               audio: url,
               caption: altText,
             });
+            await this.attachSessionToMessage(sent?.key?.id, instance.instanceId, session?.id);
+            await this.updateOutboundContext(session, sent?.messageTimestamp, followUpMode);
           } else {
-            await instance.mediaMessage(
+            const sent = await instance.mediaMessage(
               {
                 number: remoteJid.includes('@lid') ? remoteJid : remoteJid.split('@')[0],
                 delay: (settings as any)?.delayMessage || 1000,
@@ -229,6 +254,8 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
               null,
               false,
             );
+            await this.attachSessionToMessage(sent?.key?.id, instance.instanceId, session?.id);
+            await this.updateOutboundContext(session, sent?.messageTimestamp, followUpMode);
           }
         } catch (error) {
           this.logger.error(`Error sending media: ${error}`);
@@ -253,7 +280,18 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
 
     // Send any remaining text
     if (textBuffer.trim()) {
-      await this.sendFormattedText(instance, remoteJid, textBuffer.trim(), settings, splitMessages, linkPreview);
+      if (!(await this.shouldSendResponse(session, responseKeyId))) return;
+      await this.sendFormattedText(
+        instance,
+        remoteJid,
+        textBuffer.trim(),
+        settings,
+        splitMessages,
+        linkPreview,
+        session,
+        responseKeyId,
+        followUpMode,
+      );
     }
   }
 
@@ -273,6 +311,9 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     message: string,
     settings: any,
     linkPreview: boolean = true,
+    session?: IntegrationSession,
+    responseKeyId?: string,
+    followUpMode: boolean = false,
   ): Promise<void> {
     const timePerChar = settings?.timePerChar ?? 0;
     const minDelay = 1000;
@@ -288,7 +329,11 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
 
     await new Promise<void>((resolve) => {
       setTimeout(async () => {
-        await instance.textMessage(
+        if (!(await this.shouldSendResponse(session, responseKeyId))) {
+          resolve();
+          return;
+        }
+        const sent = await instance.textMessage(
           {
             number: remoteJid.includes('@lid') ? remoteJid : remoteJid.split('@')[0],
             delay: settings?.delayMessage || 1000,
@@ -297,6 +342,8 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
           },
           false,
         );
+        await this.attachSessionToMessage(sent?.key?.id, instance.instanceId, session?.id);
+        await this.updateOutboundContext(session, sent?.messageTimestamp, followUpMode);
         resolve();
       }, delay);
     });
@@ -316,6 +363,9 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     settings: any,
     splitMessages: boolean,
     linkPreview: boolean = true,
+    session?: IntegrationSession,
+    responseKeyId?: string,
+    followUpMode: boolean = false,
   ): Promise<void> {
     if (splitMessages) {
       const messageParts = this.splitMessageByDoubleLineBreaks(text);
@@ -325,15 +375,67 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
       for (let index = 0; index < messageParts.length; index++) {
         const message = messageParts[index];
 
+        if (!(await this.shouldSendResponse(session, responseKeyId))) return;
+
         this.logger.debug(`[BaseChatbot] Sending message part ${index + 1}/${messageParts.length}`);
-        await this.sendSingleMessage(instance, remoteJid, message, settings, linkPreview);
+        await this.sendSingleMessage(
+          instance,
+          remoteJid,
+          message,
+          settings,
+          linkPreview,
+          session,
+          responseKeyId,
+          followUpMode,
+        );
       }
 
       this.logger.debug(`[BaseChatbot] All message parts sent successfully`);
     } else {
       this.logger.debug(`[BaseChatbot] Sending single message`);
-      await this.sendSingleMessage(instance, remoteJid, text, settings, linkPreview);
+      await this.sendSingleMessage(
+        instance,
+        remoteJid,
+        text,
+        settings,
+        linkPreview,
+        session,
+        responseKeyId,
+        followUpMode,
+      );
     }
+  }
+
+  protected async updateOutboundContext(
+    session?: IntegrationSession,
+    messageTimestamp?: number,
+    followUpMode: boolean = false,
+  ): Promise<void> {
+    if (!session?.id) return;
+
+    const currentContext =
+      session.context && typeof session.context === 'object' ? (session.context as Record<string, any>) : {};
+    const outboundAt = messageTimestamp ?? Math.floor(Date.now() / 1000);
+
+    const data: Record<string, any> = {
+      context: {
+        ...currentContext,
+        lastOutboundAt: outboundAt,
+        lastOutboundBy: 'agent',
+      },
+    };
+
+    await this.prismaRepository.integrationSession.update({
+      where: { id: session.id },
+      data,
+    });
+  }
+
+  protected async shouldSendResponse(
+    _session?: IntegrationSession,
+    _responseKeyId?: string,
+  ): Promise<boolean> {
+    return true;
   }
 
   /**
@@ -381,7 +483,16 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
       session = sessionResult.session;
     }
 
+    const incomingKey = msg?.key?.fromMe ? null : msg?.key?.id;
+    const nextContext = incomingKey
+      ? {
+          lastInboundKeyId: incomingKey,
+          lastInboundAt: msg?.messageTimestamp || null,
+        }
+      : undefined;
+
     // Update session status to opened
+    const funnelId = (bot as any)?.funnelId || null;
     await this.prismaRepository.integrationSession.update({
       where: {
         id: session.id,
@@ -389,11 +500,53 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
       data: {
         status: 'opened',
         awaitUser: false,
+        ...(funnelId
+          ? { funnelId, funnelEnable: true, followUpEnable: true, funnelStage: null, followUpStage: null }
+          : { funnelEnable: false }),
+        ...(nextContext ? { context: nextContext } : {}),
       },
     });
+    if (incomingKey) {
+      setLastInboundKeyId(session.id, incomingKey);
+    }
+
+    await this.attachSessionToMessage(msg?.key?.id, instance.instanceId, session.id);
 
     // Forward the message to the chatbot
     await this.sendMessageToBot(instance, session, settings, bot, remoteJid, pushName || '', content, msg);
+  }
+
+  protected async attachSessionToMessage(
+    messageKeyId: string | undefined,
+    instanceId: string | undefined,
+    sessionId: string | undefined,
+  ): Promise<void> {
+    if (!messageKeyId || !instanceId || !sessionId) return;
+
+    try {
+      const message = await this.prismaRepository.message.findFirst({
+        where: {
+          instanceId,
+          key: {
+            path: ['id'],
+            equals: messageKeyId,
+          },
+        },
+        select: {
+          id: true,
+          sessionId: true,
+        },
+      });
+
+      if (message && message.sessionId !== sessionId) {
+        await this.prismaRepository.message.update({
+          where: { id: message.id },
+          data: { sessionId },
+        });
+      }
+    } catch (error) {
+      this.logger.warn(`[BaseChatbot] Failed to attach session to message: ${error}`);
+    }
   }
 
   /**

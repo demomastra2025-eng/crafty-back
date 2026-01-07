@@ -4,6 +4,7 @@ import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Events } from '@api/types/wa.types';
 import { Logger } from '@config/logger.config';
+import { setLastInboundKeyId } from '@api/integrations/chatbot/session-cache';
 import { BadRequestException } from '@exceptions';
 import { TriggerOperator, TriggerType } from '@prisma/client';
 import { getConversationMessage } from '@utils/getConversationMessage';
@@ -208,6 +209,14 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
     // and add bot-specific fields to the data object
 
     try {
+      const instanceId = await this.prismaRepository.instance
+        .findFirst({
+          where: {
+            name: instance.instanceName,
+          },
+        })
+        .then((record) => record.id);
+
       const botData = {
         enabled: data?.enabled,
         description: data.description,
@@ -219,7 +228,7 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
         stopBotFromMe: data.stopBotFromMe,
         keepOpen: data.keepOpen,
         debounceTime: data.debounceTime,
-        instanceId: instanceId,
+        instanceId,
         triggerType: data.triggerType,
         triggerOperator: data.triggerOperator,
         triggerValue: data.triggerValue,
@@ -868,6 +877,24 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
         participant: string;
       };
 
+      if (!key.fromMe && session && key.id) {
+        const currentContext =
+          session.context && typeof session.context === 'object' ? (session.context as Record<string, any>) : {};
+        await this.prismaRepository.integrationSession.update({
+          where: {
+            id: session.id,
+          },
+          data: {
+            context: {
+              ...currentContext,
+              lastInboundKeyId: key.id,
+              lastInboundAt: msg?.messageTimestamp || null,
+            },
+          },
+        });
+        setLastInboundKeyId(session.id, key.id);
+      }
+
       // Handle stopping the bot if message is from me
       if (stopBotFromMe && key.fromMe && session) {
         await this.prismaRepository.integrationSession.update({
@@ -919,18 +946,25 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
 
       // Process with debounce if needed
       if (debounceTime && debounceTime > 0) {
-        this.processDebounce(this.userMessageDebounce, content, remoteJid, debounceTime, async (debouncedContent) => {
-          await this.processBot(
-            this.waMonitor.waInstances[instance.instanceName],
-            remoteJid,
-            findBot,
-            session,
-            mergedSettings,
-            debouncedContent,
-            msg?.pushName,
-            msg,
-          );
-        });
+        this.processDebounce(
+          this.userMessageDebounce,
+          content,
+          remoteJid,
+          debounceTime,
+          msg,
+          async (debouncedContent, lastMsg) => {
+            await this.processBot(
+              this.waMonitor.waInstances[instance.instanceName],
+              remoteJid,
+              findBot,
+              session,
+              mergedSettings,
+              debouncedContent,
+              lastMsg?.pushName,
+              lastMsg,
+            );
+          },
+        );
       } else {
         await this.processBot(
           this.waMonitor.waInstances[instance.instanceName],

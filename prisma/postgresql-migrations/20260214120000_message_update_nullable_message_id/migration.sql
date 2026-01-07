@@ -1,0 +1,1 @@
+ALTER TABLE "MessageUpdate" ALTER COLUMN "messageId" DROP NOT NULL;

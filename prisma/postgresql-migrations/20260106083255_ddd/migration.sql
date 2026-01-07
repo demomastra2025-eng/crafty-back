@@ -1,0 +1,1 @@
+-- noop (columns moved to a later migration after Funnel exists)

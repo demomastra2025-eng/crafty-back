@@ -26,12 +26,14 @@ export const n8nSchema: JSONSchema7 = {
   properties: {
     enabled: { type: 'boolean' },
     description: { type: 'string' },
-    webhookUrl: { type: 'string' },
+    prompt: { type: 'string' },
+    webhookUrl: { type: ['string', 'null'] },
     basicAuthUser: { type: 'string' },
-    basicAuthPassword: { type: 'string' },
+    basicAuthPass: { type: 'string' },
     triggerType: { type: 'string', enum: ['all', 'keyword', 'none', 'advanced'] },
     triggerOperator: { type: 'string', enum: ['equals', 'contains', 'startsWith', 'endsWith', 'regex'] },
     triggerValue: { type: 'string' },
+    funnelId: { type: ['string', 'null'] },
     expire: { type: 'integer' },
     keywordFinish: { type: 'string' },
     delayMessage: { type: 'integer' },
@@ -44,8 +46,8 @@ export const n8nSchema: JSONSchema7 = {
     splitMessages: { type: 'boolean' },
     timePerChar: { type: 'integer' },
   },
-  required: ['enabled', 'webhookUrl', 'triggerType'],
-  ...isNotEmpty('enabled', 'webhookUrl', 'triggerType'),
+  required: ['enabled', 'triggerType'],
+  ...isNotEmpty('enabled', 'triggerType'),
 };
 
 export const n8nStatusSchema: JSONSchema7 = {
@@ -72,7 +74,7 @@ export const n8nSettingSchema: JSONSchema7 = {
     keepOpen: { type: 'boolean' },
     debounceTime: { type: 'integer' },
     ignoreJids: { type: 'array', items: { type: 'string' } },
-    botIdFallback: { type: 'string' },
+    fallbackId: { type: 'string' },
     splitMessages: { type: 'boolean' },
     timePerChar: { type: 'integer' },
   },
@@ -113,4 +115,14 @@ export const n8nIgnoreJidSchema: JSONSchema7 = {
   },
   required: ['remoteJid', 'action'],
   ...isNotEmpty('remoteJid', 'action'),
+};
+
+export const n8nEmitSchema: JSONSchema7 = {
+  $id: v4(),
+  type: 'object',
+  properties: {
+    remoteJid: { type: 'string' },
+  },
+  required: ['remoteJid'],
+  ...isNotEmpty('remoteJid'),
 };

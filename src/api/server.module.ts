@@ -6,6 +6,8 @@ import { Logger } from '@config/logger.config';
 import { BusinessController } from './controllers/business.controller';
 import { CallController } from './controllers/call.controller';
 import { ChatController } from './controllers/chat.controller';
+import { AuthController } from './controllers/auth.controller';
+import { CompanyController } from './controllers/company.controller';
 import { GroupController } from './controllers/group.controller';
 import { InstanceController } from './controllers/instance.controller';
 import { LabelController } from './controllers/label.controller';
@@ -16,6 +18,7 @@ import { TemplateController } from './controllers/template.controller';
 import { ChannelController } from './integrations/channel/channel.controller';
 import { EvolutionController } from './integrations/channel/evolution/evolution.controller';
 import { MetaController } from './integrations/channel/meta/meta.controller';
+import { TelegramController } from './integrations/channel/telegram/telegram.controller';
 import { BaileysController } from './integrations/channel/whatsapp/baileys.controller';
 import { ChatbotController } from './integrations/chatbot/chatbot.controller';
 import { ChatwootController } from './integrations/chatbot/chatwoot/controllers/chatwoot.controller';
@@ -26,6 +29,9 @@ import { EvoaiController } from './integrations/chatbot/evoai/controllers/evoai.
 import { EvoaiService } from './integrations/chatbot/evoai/services/evoai.service';
 import { EvolutionBotController } from './integrations/chatbot/evolutionBot/controllers/evolutionBot.controller';
 import { EvolutionBotService } from './integrations/chatbot/evolutionBot/services/evolutionBot.service';
+import { FunnelController } from './integrations/chatbot/funnel/controllers/funnel.controller';
+import { FunnelFollowUpService } from './integrations/chatbot/funnel/services/funnel-followup.service';
+import { FunnelService } from './integrations/chatbot/funnel/services/funnel.service';
 import { FlowiseController } from './integrations/chatbot/flowise/controllers/flowise.controller';
 import { FlowiseService } from './integrations/chatbot/flowise/services/flowise.service';
 import { N8nController } from './integrations/chatbot/n8n/controllers/n8n.controller';
@@ -78,6 +84,9 @@ export const s3Controller = new S3Controller(s3Service);
 const templateService = new TemplateService(waMonitor, prismaRepository, configService);
 export const templateController = new TemplateController(templateService);
 
+export const authController = new AuthController(prismaRepository, configService);
+export const companyController = new CompanyController(prismaRepository);
+
 const proxyService = new ProxyService(waMonitor);
 export const proxyController = new ProxyController(proxyService, waMonitor);
 
@@ -100,7 +109,6 @@ export const instanceController = new InstanceController(
   baileysCache,
   providerFiles,
 );
-export const sendMessageController = new SendMessageController(waMonitor);
 export const callController = new CallController(waMonitor);
 export const chatController = new ChatController(waMonitor);
 export const businessController = new BusinessController(waMonitor);
@@ -114,6 +122,7 @@ export const channelController = new ChannelController(prismaRepository, waMonit
 // channels
 export const evolutionController = new EvolutionController(prismaRepository, waMonitor);
 export const metaController = new MetaController(prismaRepository, waMonitor);
+export const telegramController = new TelegramController(prismaRepository, waMonitor);
 export const baileysController = new BaileysController(waMonitor);
 
 const openaiService = new OpenaiService(waMonitor, prismaRepository, configService);
@@ -133,7 +142,14 @@ const flowiseService = new FlowiseService(waMonitor, prismaRepository, configSer
 export const flowiseController = new FlowiseController(flowiseService, prismaRepository, waMonitor);
 
 const n8nService = new N8nService(waMonitor, prismaRepository, configService, openaiService);
-export const n8nController = new N8nController(n8nService, prismaRepository, waMonitor);
+export const n8nController = new N8nController(n8nService, prismaRepository, waMonitor, cache);
+
+const funnelService = new FunnelService(prismaRepository, cache);
+export const funnelController = new FunnelController(funnelService);
+const funnelFollowUpService = new FunnelFollowUpService(prismaRepository, waMonitor, n8nService);
+export { funnelFollowUpService };
+
+export const sendMessageController = new SendMessageController(waMonitor);
 
 const evoaiService = new EvoaiService(waMonitor, prismaRepository, configService, openaiService);
 export const evoaiController = new EvoaiController(evoaiService, prismaRepository, waMonitor);

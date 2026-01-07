@@ -255,6 +255,7 @@ export class WAMonitoringService {
           token: data.hash,
           clientName: clientName,
           businessId: data.businessId,
+          companyId: data.companyId || null,
         },
       });
     } catch (error) {

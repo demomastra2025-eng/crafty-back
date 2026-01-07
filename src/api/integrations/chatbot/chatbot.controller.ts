@@ -111,25 +111,29 @@ export class ChatbotController {
     content: string,
     remoteJid: string,
     debounceTime: number,
-    callback: any,
+    msg: any,
+    callback: (debouncedContent: string, lastMsg: any) => Promise<void>,
   ) {
     if (userMessageDebounce[remoteJid]) {
       userMessageDebounce[remoteJid].message += `\n${content}`;
+      userMessageDebounce[remoteJid].lastMsg = msg;
       this.logger.log('message debounced: ' + userMessageDebounce[remoteJid].message);
       clearTimeout(userMessageDebounce[remoteJid].timeoutId);
     } else {
       userMessageDebounce[remoteJid] = {
         message: content,
+        lastMsg: msg,
         timeoutId: null,
       };
     }
 
     userMessageDebounce[remoteJid].timeoutId = setTimeout(() => {
       const myQuestion = userMessageDebounce[remoteJid].message;
+      const lastMsg = userMessageDebounce[remoteJid].lastMsg;
       this.logger.log('Debounce complete. Processing message: ' + myQuestion);
 
       delete userMessageDebounce[remoteJid];
-      callback(myQuestion);
+      callback(myQuestion, lastMsg);
     }, debounceTime * 1000);
   }
 

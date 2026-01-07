@@ -172,8 +172,6 @@
 * **Workflows**: Update checkout step to include submodules
   - Added 'submodules: recursive' option to checkout step in multiple workflow files to ensure submodules are properly initialized during CI/CD processes
 * **Manager**: Update asset files and install process
-  - Updated subproject reference in evolution-manager-v2 to the latest commit
-  - Enhanced the manager_install.sh script to include npm install and build steps
   - Replaced old JavaScript asset file with a new version for improved performance
   - Added a new CSS file for consistent styling across the application
 

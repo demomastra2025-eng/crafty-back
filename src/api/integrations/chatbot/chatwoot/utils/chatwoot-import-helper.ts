@@ -5,7 +5,7 @@ import { ChatwootService } from '@api/integrations/chatbot/chatwoot/services/cha
 import { Chatwoot, configService } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { inbox } from '@figuro/chatwoot-sdk';
-import { Chatwoot as ChatwootModel, Contact, Message } from '@prisma/client';
+import { Chatwoot as ChatwootModel, Message } from '@prisma/client';
 import { proto } from 'baileys';
 
 type ChatwootUser = {
@@ -26,11 +26,16 @@ type firstLastTimestamp = {
 
 type IWebMessageInfo = Omit<proto.IWebMessageInfo, 'key'> & Partial<Pick<proto.IWebMessageInfo, 'key'>>;
 
+type ChatwootContact = {
+  remoteJid: string;
+  pushName?: string | null;
+};
+
 class ChatwootImport {
   private logger = new Logger('ChatwootImport');
   private repositoryMessagesCache = new Map<string, Set<string>>();
   private historyMessages = new Map<string, Message[]>();
-  private historyContacts = new Map<string, Contact[]>();
+  private historyContacts = new Map<string, ChatwootContact[]>();
 
   public getRepositoryMessagesCache(instance: InstanceDto) {
     return this.repositoryMessagesCache.has(instance.instanceName)
@@ -53,7 +58,7 @@ class ChatwootImport {
     this.historyMessages.set(instance.instanceName, [...actualValue, ...messagesRaw]);
   }
 
-  public addHistoryContacts(instance: InstanceDto, contactsRaw: Contact[]) {
+  public addHistoryContacts(instance: InstanceDto, contactsRaw: ChatwootContact[]) {
     const actualValue = this.historyContacts.has(instance.instanceName)
       ? this.historyContacts.get(instance.instanceName)
       : [];
@@ -93,7 +98,7 @@ class ChatwootImport {
         return 0;
       }
 
-      let contactsChunk: Contact[] = this.sliceIntoChunks(contacts, 3000);
+      let contactsChunk: ChatwootContact[] = this.sliceIntoChunks(contacts, 3000);
       while (contactsChunk.length > 0) {
         const labelSql = `SELECT id FROM labels WHERE title = '${provider.nameInbox}' AND account_id = ${provider.accountId} LIMIT 1`;
 
@@ -112,9 +117,14 @@ class ChatwootImport {
         const bindInsert = [provider.accountId];
 
         for (const contact of contactsChunk) {
+          if (!contact?.remoteJid) {
+            continue;
+          }
           const isGroup = this.isIgnorePhoneNumber(contact.remoteJid);
 
-          const contactName = isGroup ? `${contact.pushName} (GROUP)` : contact.pushName;
+          const contactName = isGroup
+            ? `${contact.pushName || contact.remoteJid} (GROUP)`
+            : contact.pushName || contact.remoteJid;
           bindInsert.push(contactName);
           const bindName = `$${bindInsert.length}`;
 

@@ -49,6 +49,7 @@ export class Metadata {
 
 export class SendTextDto extends Metadata {
   text: string;
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
 }
 export class SendPresence extends Metadata {
   text: string;
@@ -77,6 +78,7 @@ export class SendMediaDto extends Metadata {
   mediatype: MediaType;
   mimetype?: string;
   caption?: string;
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
   // for document
   fileName?: string;
   // url or base64
@@ -117,6 +119,8 @@ export class SendButtonsDto extends Metadata {
   title: string;
   description?: string;
   footer?: string;
+  keyboardType?: 'inline' | 'reply';
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
   buttons: Button[];
 }
 
@@ -158,6 +162,20 @@ export class SendTemplateDto extends Metadata {
   language: string;
   components: any;
   webhookUrl?: string;
+}
+
+export type TelegramMediaGroupType = 'photo' | 'video' | 'audio' | 'document';
+
+export type TelegramMediaGroupItem = {
+  type: TelegramMediaGroupType;
+  media: string;
+  caption?: string;
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
+  fileName?: string;
+};
+
+export class SendMediaGroupDto extends Metadata {
+  medias: TelegramMediaGroupItem[];
 }
 export class SendContactDto extends Metadata {
   contact: ContactMessage[];

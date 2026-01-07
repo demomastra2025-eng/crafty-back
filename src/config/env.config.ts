@@ -194,6 +194,10 @@ export type WaBusiness = {
   LANGUAGE: string;
 };
 
+export type TelegramBot = {
+  URL: string;
+};
+
 export type EventsWebhook = {
   APPLICATION_STARTUP: boolean;
   INSTANCE_CREATE: boolean;
@@ -263,6 +267,9 @@ export type ApiKey = { KEY: string };
 export type Auth = {
   API_KEY: ApiKey;
   EXPOSE_IN_FETCH_INSTANCES: boolean;
+  JWT_SECRET: string;
+  JWT_EXPIRES_IN: string;
+  KEY_ENCRYPTION_SECRET: string;
 };
 
 export type DelInstance = number | boolean;
@@ -329,9 +336,9 @@ export type Chatwoot = {
     PLACEHOLDER_MEDIA_MESSAGE: boolean;
   };
 };
-export type Openai = { ENABLED: boolean; API_KEY_GLOBAL?: string };
+export type Openai = { ENABLED: boolean; API_KEY_GLOBAL?: string; VISION_MODEL?: string };
 export type Dify = { ENABLED: boolean };
-export type N8n = { ENABLED: boolean };
+export type N8n = { ENABLED: boolean; DEFAULT_WEBHOOK_URL?: string };
 export type Evoai = { ENABLED: boolean };
 export type Flowise = { ENABLED: boolean };
 
@@ -403,6 +410,7 @@ export interface Env {
   KAFKA: Kafka;
   WEBSOCKET: Websocket;
   WA_BUSINESS: WaBusiness;
+  TELEGRAM_BOT: TelegramBot;
   LOG: Log;
   DEL_INSTANCE: DelInstance;
   DEL_TEMP_INSTANCES: boolean;
@@ -730,6 +738,9 @@ export class ConfigService {
         VERSION: process.env.WA_BUSINESS_VERSION || 'v18.0',
         LANGUAGE: process.env.WA_BUSINESS_LANGUAGE || 'en',
       },
+      TELEGRAM_BOT: {
+        URL: process.env.TELEGRAM_BOT_URL || 'https://api.telegram.org',
+      },
       LOG: {
         LEVEL:
           (process.env?.LOG_LEVEL?.split(',') as LogLevel[]) ||
@@ -826,12 +837,14 @@ export class ConfigService {
       OPENAI: {
         ENABLED: process.env?.OPENAI_ENABLED === 'true',
         API_KEY_GLOBAL: process.env?.OPENAI_API_KEY_GLOBAL || null,
+        VISION_MODEL: process.env?.OPENAI_VISION_MODEL || 'gpt-5.2',
       },
       DIFY: {
         ENABLED: process.env?.DIFY_ENABLED === 'true',
       },
       N8N: {
         ENABLED: process.env?.N8N_ENABLED === 'true',
+        DEFAULT_WEBHOOK_URL: process.env?.N8N_DEFAULT_WEBHOOK_URL || '',
       },
       EVOAI: {
         ENABLED: process.env?.EVOAI_ENABLED === 'true',
@@ -869,6 +882,9 @@ export class ConfigService {
           KEY: process.env.AUTHENTICATION_API_KEY || 'BQYHJGJHJ',
         },
         EXPOSE_IN_FETCH_INSTANCES: process.env?.AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES === 'true',
+        JWT_SECRET: process.env.AUTH_JWT_SECRET || 'change-me',
+        JWT_EXPIRES_IN: process.env.AUTH_JWT_EXPIRES_IN || '7d',
+        KEY_ENCRYPTION_SECRET: process.env.AUTH_KEY_ENCRYPTION_SECRET || '',
       },
       METRICS: {
         ENABLED: process.env?.PROMETHEUS_METRICS === 'true',

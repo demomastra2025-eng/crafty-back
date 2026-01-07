@@ -6,6 +6,7 @@ import {
   SendListDto,
   SendLocationDto,
   SendMediaDto,
+  SendMediaGroupDto,
   SendPollDto,
   SendPtvDto,
   SendReactionDto,
@@ -22,6 +23,7 @@ import {
   listMessageSchema,
   locationMessageSchema,
   mediaMessageSchema,
+  mediaGroupMessageSchema,
   pollMessageSchema,
   ptvMessageSchema,
   reactionMessageSchema,
@@ -69,6 +71,48 @@ export class MessageRouter extends RouterBroker {
           schema: mediaMessageSchema,
           ClassRef: SendMediaDto,
           execute: (instance) => sendMessageController.sendMedia(instance, bodyData, req.file as any),
+        });
+
+        return res.status(HttpStatus.CREATED).json(response);
+      })
+      .post(this.routerPath('sendMediaGroup'), ...guards, upload.array('files'), async (req, res) => {
+        const bodyData: any = req.body || {};
+        const files = (req.files || []) as any[];
+        let rawMedias: any = bodyData.medias;
+        if (typeof bodyData.medias === 'string') {
+          try {
+            rawMedias = JSON.parse(bodyData.medias);
+          } catch {
+            rawMedias = bodyData.medias;
+          }
+        }
+
+        if (Array.isArray(rawMedias)) {
+          const fileMap = new Map<string, any>();
+          files.forEach((file, idx) => {
+            if (file?.originalname) fileMap.set(file.originalname, file);
+            if (file?.fieldname) fileMap.set(file.fieldname, file);
+            fileMap.set(String(idx), file);
+          });
+
+          bodyData.medias = rawMedias.map((item, idx) => {
+            const mediaRef = item?.media;
+            const fileRef = typeof mediaRef === 'string' && mediaRef.startsWith('file:') ? mediaRef.slice(5) : null;
+            const lookupKey = fileRef || item?.fileName || String(idx);
+            const file = fileMap.get(lookupKey) || files[idx];
+
+            if ((!mediaRef || fileRef) && file?.buffer) {
+              return { ...item, media: file.buffer.toString('base64') };
+            }
+            return item;
+          });
+        }
+
+        const response = await this.dataValidate<SendMediaGroupDto>({
+          request: req,
+          schema: mediaGroupMessageSchema,
+          ClassRef: SendMediaGroupDto,
+          execute: (instance, data) => sendMessageController.sendMediaGroup(instance, data),
         });
 
         return res.status(HttpStatus.CREATED).json(response);

@@ -2559,7 +2559,10 @@ export class ChatwootService {
     chatwootImport.addHistoryMessages(instance, messagesRaw);
   }
 
-  public addHistoryContacts(instance: InstanceDto, contactsRaw: ContactModel[]) {
+  public addHistoryContacts(
+    instance: InstanceDto,
+    contactsRaw: Array<{ remoteJid: string; pushName?: string | null }>,
+  ) {
     if (!this.isImportHistoryAvailable()) {
       return;
     }

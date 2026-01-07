@@ -120,7 +120,11 @@ export class SendPresenceDto extends Metadata {
 export class UpdateMessageDto extends Metadata {
   number: string;
   key: proto.IMessageKey;
-  text: string;
+  text?: string;
+  caption?: string;
+  media?: string;
+  mediatype?: 'image' | 'video' | 'audio' | 'document';
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
 }
 
 export class BlockUserDto {

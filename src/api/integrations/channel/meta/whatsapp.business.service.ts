@@ -520,34 +520,25 @@ export class BusinessStartupService extends ChannelStartupService {
                   messageRaw.message.base64 = buffer.data.toString('base64');
                 }
 
-                // Processar OpenAI speech-to-text para áudio após o mediaUrl estar disponível
-                if (this.configService.get<Openai>('OPENAI').ENABLED && mediaType === 'audio') {
-                  const openAiDefaultSettings = await this.prismaRepository.openaiSetting.findFirst({
-                    where: {
-                      instanceId: this.instanceId,
-                    },
-                    include: {
-                      OpenaiCreds: true,
-                    },
-                  });
-
-                  if (
-                    openAiDefaultSettings &&
-                    openAiDefaultSettings.openaiCredsId &&
-                    openAiDefaultSettings.speechToText
-                  ) {
+                if (this.configService.get<Openai>('OPENAI').ENABLED) {
+                  if (mediaType === 'audio') {
                     try {
-                      messageRaw.message.speechToText = `[audio] ${await this.openaiService.speechToText(
-                        openAiDefaultSettings.OpenaiCreds,
-                        {
-                          message: {
-                            mediaUrl: messageRaw.message.mediaUrl,
-                            ...messageRaw,
-                          },
-                        },
-                      )}`;
+                      const transcription = await this.openaiService.speechToTextSystem(messageRaw, this);
+                      if (transcription) {
+                        messageRaw.message.speechToText = `[audio] ${transcription}`;
+                      }
                     } catch (speechError) {
                       this.logger.error(`Error processing speech-to-text: ${speechError}`);
+                    }
+                  }
+                  if (mediaType === 'image') {
+                    try {
+                      const caption = await this.openaiService.describeImageSystem(messageRaw, this);
+                      if (caption) {
+                        messageRaw.message.imageCaption = caption;
+                      }
+                    } catch (visionError) {
+                      this.logger.error(`Error processing image vision: ${visionError}`);
                     }
                   }
                 }
@@ -561,36 +552,25 @@ export class BusinessStartupService extends ChannelStartupService {
               messageRaw.message.base64 = buffer.toString('base64');
             }
 
-            // Processar OpenAI speech-to-text para áudio mesmo sem S3
-            if (this.configService.get<Openai>('OPENAI').ENABLED && message.type === 'audio') {
-              let openAiBase64 = messageRaw.message.base64;
-              if (!openAiBase64) {
-                const buffer = await this.downloadMediaMessage(received?.messages[0]);
-                openAiBase64 = buffer.toString('base64');
-              }
-
-              const openAiDefaultSettings = await this.prismaRepository.openaiSetting.findFirst({
-                where: {
-                  instanceId: this.instanceId,
-                },
-                include: {
-                  OpenaiCreds: true,
-                },
-              });
-
-              if (openAiDefaultSettings && openAiDefaultSettings.openaiCredsId && openAiDefaultSettings.speechToText) {
+            if (this.configService.get<Openai>('OPENAI').ENABLED) {
+              if (message.type === 'audio') {
                 try {
-                  messageRaw.message.speechToText = `[audio] ${await this.openaiService.speechToText(
-                    openAiDefaultSettings.OpenaiCreds,
-                    {
-                      message: {
-                        base64: openAiBase64,
-                        ...messageRaw,
-                      },
-                    },
-                  )}`;
+                  const transcription = await this.openaiService.speechToTextSystem(messageRaw, this);
+                  if (transcription) {
+                    messageRaw.message.speechToText = `[audio] ${transcription}`;
+                  }
                 } catch (speechError) {
                   this.logger.error(`Error processing speech-to-text: ${speechError}`);
+                }
+              }
+              if (message.type === 'image') {
+                try {
+                  const caption = await this.openaiService.describeImageSystem(messageRaw, this);
+                  if (caption) {
+                    messageRaw.message.imageCaption = caption;
+                  }
+                } catch (visionError) {
+                  this.logger.error(`Error processing image vision: ${visionError}`);
                 }
               }
             }

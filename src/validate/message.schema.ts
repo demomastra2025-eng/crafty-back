@@ -71,6 +71,7 @@ export const textMessageSchema: JSONSchema7 = {
   properties: {
     number: { ...numberDefinition },
     text: { type: 'string' },
+    parseMode: { type: 'string', enum: ['Markdown', 'MarkdownV2', 'HTML'] },
     linkPreview: { type: 'boolean' },
     delay: {
       type: 'integer',
@@ -102,6 +103,7 @@ export const mediaMessageSchema: JSONSchema7 = {
     media: { type: 'string' },
     fileName: { type: 'string' },
     caption: { type: 'string' },
+    parseMode: { type: 'string', enum: ['Markdown', 'MarkdownV2', 'HTML'] },
     delay: {
       type: 'integer',
       description: 'Enter a value in milliseconds',
@@ -120,6 +122,31 @@ export const mediaMessageSchema: JSONSchema7 = {
     },
   },
   required: ['number', 'mediatype'],
+};
+
+export const mediaGroupMessageSchema: JSONSchema7 = {
+  $id: v4(),
+  type: 'object',
+  properties: {
+    number: { ...numberDefinition },
+    medias: {
+      type: 'array',
+      minItems: 2,
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['photo', 'video', 'audio', 'document'] },
+          media: { type: 'string' },
+          caption: { type: 'string' },
+          parseMode: { type: 'string', enum: ['Markdown', 'MarkdownV2', 'HTML'] },
+          fileName: { type: 'string' },
+        },
+        required: ['type', 'media'],
+        ...isNotEmpty('media'),
+      },
+    },
+  },
+  required: ['number', 'medias'],
 };
 
 export const ptvMessageSchema: JSONSchema7 = {
@@ -406,6 +433,8 @@ export const buttonsMessageSchema: JSONSchema7 = {
     title: { type: 'string' },
     description: { type: 'string' },
     footer: { type: 'string' },
+    keyboardType: { type: 'string', enum: ['inline', 'reply'] },
+    parseMode: { type: 'string', enum: ['Markdown', 'MarkdownV2', 'HTML'] },
     buttons: {
       type: 'array',
       items: {

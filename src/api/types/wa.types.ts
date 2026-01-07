@@ -44,6 +44,7 @@ export declare namespace wa {
     pairingCode?: string;
     base64?: string;
     code?: string;
+    qrTimeoutMs?: number;
   };
 
   export type Instance = {
@@ -154,4 +155,5 @@ export const Integration = {
   WHATSAPP_BUSINESS: 'WHATSAPP-BUSINESS',
   WHATSAPP_BAILEYS: 'WHATSAPP-BAILEYS',
   EVOLUTION: 'EVOLUTION',
+  TELEGRAM_BOT: 'TELEGRAM-BOT',
 };

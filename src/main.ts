@@ -5,7 +5,7 @@ import '@utils/instrumentSentry';
 import { ProviderFiles } from '@api/provider/sessions';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { HttpStatus, router } from '@api/routes/index.router';
-import { eventManager, waMonitor } from '@api/server.module';
+import { eventManager, funnelFollowUpService, waMonitor } from '@api/server.module';
 import {
   Auth,
   configService,
@@ -162,6 +162,8 @@ async function bootstrap() {
   initWA().catch((error) => {
     logger.error('Error loading instances: ' + error);
   });
+
+  funnelFollowUpService.startScheduler();
 
   onUnexpectedError();
 }

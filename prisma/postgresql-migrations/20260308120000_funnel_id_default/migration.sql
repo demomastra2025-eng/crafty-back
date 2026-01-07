@@ -1,0 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+ALTER TABLE "Funnel"
+  ALTER COLUMN "id" SET DEFAULT gen_random_uuid();

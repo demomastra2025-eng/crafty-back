@@ -148,25 +148,18 @@ export class EvolutionStartupService extends ChannelStartupService {
           instanceId: this.instanceId,
         };
 
-        const isAudio = received?.message?.audioMessage;
-
-        if (this.configService.get<Openai>('OPENAI').ENABLED && isAudio) {
-          const openAiDefaultSettings = await this.prismaRepository.openaiSetting.findFirst({
-            where: {
-              instanceId: this.instanceId,
-            },
-            include: {
-              OpenaiCreds: true,
-            },
-          });
-
-          if (
-            openAiDefaultSettings &&
-            openAiDefaultSettings.openaiCredsId &&
-            openAiDefaultSettings.speechToText &&
-            received?.message?.audioMessage
-          ) {
-            messageRaw.message.speechToText = `[audio] ${await this.openaiService.speechToText(received, this)}`;
+        if (this.configService.get<Openai>('OPENAI').ENABLED) {
+          if (received?.message?.audioMessage) {
+            const transcription = await this.openaiService.speechToTextSystem(received, this);
+            if (transcription) {
+              messageRaw.message.speechToText = `[audio] ${transcription}`;
+            }
+          }
+          if (received?.message?.imageMessage || received?.message?.associatedChildMessage?.message?.imageMessage) {
+            const caption = await this.openaiService.describeImageSystem(received, this);
+            if (caption) {
+              messageRaw.message.imageCaption = caption;
+            }
           }
         }
 

@@ -2,7 +2,7 @@ import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Integration } from '@api/types/wa.types';
 import { ConfigService, Language, Openai as OpenaiConfig } from '@config/env.config';
-import { IntegrationSession, OpenaiBot, OpenaiSetting } from '@prisma/client';
+import { IntegrationSession, OpenaiBot, OpenaiCreds, OpenaiSetting } from '@prisma/client';
 import { sendTelemetry } from '@utils/sendTelemetry';
 import axios from 'axios';
 import { downloadMediaMessage } from 'baileys';
@@ -10,6 +10,7 @@ import { isURL } from 'class-validator';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 import P from 'pino';
+import sharp from 'sharp';
 
 import { BaseChatbotService } from '../../base-chatbot.service';
 
@@ -87,6 +88,7 @@ export class OpenaiService extends BaseChatbotService<OpenaiBot, OpenaiSetting> 
             "Sorry, I couldn't transcribe your audio message. Could you please type your message instead?",
             settings,
             true,
+            session,
           );
           return;
         }
@@ -237,7 +239,7 @@ export class OpenaiService extends BaseChatbotService<OpenaiBot, OpenaiSetting> 
       // Send the response
       if (message) {
         this.logger.log('Sending message to WhatsApp');
-        await this.sendMessageWhatsApp(instance, remoteJid, message, settings, true);
+        await this.sendMessageWhatsApp(instance, remoteJid, message, settings, true, session);
       } else {
         this.logger.error('No message to send to WhatsApp');
       }
@@ -282,34 +284,12 @@ export class OpenaiService extends BaseChatbotService<OpenaiBot, OpenaiSetting> 
     // Handle image messages
     if (this.isImageMessage(content)) {
       const media = content.split('|');
+      const dataUrl = await this.buildVisionDataUrl(msg, instance);
 
-      if (msg.message.mediaUrl || msg.message.base64) {
-        let mediaBase64 = msg.message.base64 || null;
-
-        if (msg.message.mediaUrl && isURL(msg.message.mediaUrl)) {
-          const result = await axios.get(msg.message.mediaUrl, { responseType: 'arraybuffer' });
-          mediaBase64 = Buffer.from(result.data).toString('base64');
-        }
-
-        if (mediaBase64) {
-          messageData.content = [
-            { type: 'text', text: media[2] || content },
-            { type: 'image_url', image_url: { url: mediaBase64 } },
-          ];
-        }
-      } else {
-        const url = media[1].split('?')[0];
-
-        messageData.content = [
-          { type: 'text', text: media[2] || content },
-          {
-            type: 'image_url',
-            image_url: {
-              url: url,
-            },
-          },
-        ];
-      }
+      messageData.content = [
+        { type: 'text', text: media[2] || content },
+        ...(dataUrl ? [{ type: 'image_url', image_url: { url: dataUrl } }] : []),
+      ];
     }
 
     // Get thread ID from session or create new thread
@@ -492,25 +472,12 @@ export class OpenaiService extends BaseChatbotService<OpenaiBot, OpenaiSetting> 
     if (this.isImageMessage(content)) {
       this.logger.log('Found image message');
       const media = content.split('|');
+      const dataUrl = await this.buildVisionDataUrl(msg, instance);
 
-      if (msg.message.mediaUrl || msg.message.base64) {
-        messageData.content = [
-          { type: 'text', text: media[2] || content },
-          { type: 'image_url', image_url: { url: msg.message.base64 || msg.message.mediaUrl } },
-        ];
-      } else {
-        const url = media[1].split('?')[0];
-
-        messageData.content = [
-          { type: 'text', text: media[2] || content },
-          {
-            type: 'image_url',
-            image_url: {
-              url: url,
-            },
-          },
-        ];
-      }
+      messageData.content = [
+        { type: 'text', text: media[2] || content },
+        ...(dataUrl ? [{ type: 'image_url', image_url: { url: dataUrl } }] : []),
+      ];
     }
 
     // Combine all messages: system messages, pre-defined messages, conversation history, and current message
@@ -694,7 +661,7 @@ export class OpenaiService extends BaseChatbotService<OpenaiBot, OpenaiSetting> 
 
     if (msg.message.mediaUrl) {
       audio = await axios.get(msg.message.mediaUrl, { responseType: 'arraybuffer' }).then((response) => {
-        return Buffer.from(response.data, 'binary');
+        return Buffer.from(response.data);
       });
     } else if (msg.message.base64) {
       audio = Buffer.from(msg.message.base64, 'base64');
@@ -711,24 +678,328 @@ export class OpenaiService extends BaseChatbotService<OpenaiBot, OpenaiSetting> 
       );
     }
 
-    const lang = this.configService.get<Language>('LANGUAGE').includes('pt')
-      ? 'pt'
-      : this.configService.get<Language>('LANGUAGE');
+    if (!audio || audio.length === 0) {
+      this.logger.error('Audio buffer is empty for speech-to-text');
+      return null;
+    }
+
+    let format = this.detectAudioFormat(audio);
+    if (!format) {
+      try {
+        const fallback = await downloadMediaMessage(
+          { key: msg.key, message: msg?.message },
+          'buffer',
+          {},
+          {
+            logger: P({ level: 'error' }) as any,
+            reuploadRequest: instance,
+          },
+        );
+        if (fallback && fallback.length > 0) {
+          audio = fallback;
+          format = this.detectAudioFormat(audio);
+        }
+      } catch (error) {
+        this.logger.error(`Audio fallback download failed: ${error?.message || error}`);
+      }
+    }
+
+    if (!format) {
+      this.logger.error('Audio format not recognized for speech-to-text');
+      return null;
+    }
 
     const formData = new FormData();
-    formData.append('file', audio, 'audio.ogg');
+    formData.append('file', audio, { filename: `audio.${format.ext}`, contentType: format.mime });
     formData.append('model', 'whisper-1');
-    formData.append('language', lang);
 
     const apiKey = creds?.apiKey || this.configService.get<OpenaiConfig>('OPENAI').API_KEY_GLOBAL;
-
-    const response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
+    let response;
+    try {
+      response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Speech-to-text failed: ${error?.response?.status} ${JSON.stringify(error?.response?.data || error)}`,
+      );
+      return null;
+    }
 
     return response?.data?.text;
+  }
+
+  private async getInstanceCreds(instanceId: string): Promise<OpenaiCreds | null> {
+    return this.prismaRepository.openaiCreds.findFirst({
+      where: {
+        instanceId,
+        apiKey: {
+          not: null,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  private getVisionModel(): string {
+    return this.configService.get<OpenaiConfig>('OPENAI').VISION_MODEL || 'gpt-5.2';
+  }
+
+  private getTextModel(): string {
+    return this.configService.get<OpenaiConfig>('OPENAI').VISION_MODEL || 'gpt-5.2';
+  }
+
+  public async translateToEnglish(text: string, instance: any): Promise<string | null> {
+    if (!text) return null;
+
+    const creds = await this.getInstanceCreds(instance?.instanceId);
+    const apiKey = creds?.apiKey || this.configService.get<OpenaiConfig>('OPENAI').API_KEY_GLOBAL;
+    if (!apiKey) {
+      this.logger.error('OpenAI API key not found for translation');
+      return null;
+    }
+
+    try {
+      this.initClient(apiKey);
+      const response = await this.client.chat.completions.create({
+        model: this.getTextModel(),
+        messages: [
+          { role: 'system', content: 'Translate to English. Return only the translation.' },
+          { role: 'user', content: text },
+        ],
+      });
+
+      return response?.choices?.[0]?.message?.content?.trim() || null;
+    } catch (error) {
+      this.logger.error(`Translation failed: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  private async fetchBinaryFromUrl(url: string): Promise<Buffer | null> {
+    try {
+      const result = await axios.get(url, { responseType: 'arraybuffer' });
+      return Buffer.from(result.data);
+    } catch (error) {
+      this.logger.error(`Error downloading media from URL: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  private resolveImageSource(msg: any): { dataUrl?: string; mime?: string } {
+    const message = msg?.message || msg;
+    const imageMessage = message?.imageMessage || message?.associatedChildMessage?.message?.imageMessage;
+    const mime = imageMessage?.mimetype || 'image/jpeg';
+
+    if (message?.base64) {
+      return { dataUrl: `data:${mime};base64,${message.base64}`, mime };
+    }
+
+    const mediaUrl = message?.mediaUrl || imageMessage?.url;
+    if (mediaUrl) {
+      return { dataUrl: mediaUrl, mime };
+    }
+
+    return {};
+  }
+
+  private detectAudioFormat(buffer: Buffer): { mime: string; ext: string } | null {
+    if (!buffer || buffer.length < 12) return null;
+
+    const header4 = buffer.subarray(0, 4).toString('ascii');
+    if (header4 === 'OggS') return { mime: 'audio/ogg', ext: 'ogg' };
+    if (header4 === 'fLaC') return { mime: 'audio/flac', ext: 'flac' };
+    if (header4 === 'RIFF') return { mime: 'audio/wav', ext: 'wav' };
+
+    if (header4 === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) {
+      return { mime: 'audio/mpeg', ext: 'mp3' };
+    }
+
+    if (buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+      return { mime: 'audio/mp4', ext: 'mp4' };
+    }
+
+    return null;
+  }
+
+  private async buildVisionDataUrl(msg: any, instance: any): Promise<string | null> {
+    let { dataUrl } = this.resolveImageSource(msg);
+
+    const toPngDataUrl = async (buffer: Buffer) => {
+      const png = await sharp(buffer).png().toBuffer();
+      return `data:image/png;base64,${png.toString('base64')}`;
+    };
+
+    let buffer: Buffer | null = null;
+    if (dataUrl?.startsWith('data:')) {
+      const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
+      if (match) {
+        const base64Data = match[2];
+        try {
+          buffer = Buffer.from(base64Data, 'base64');
+        } catch (error) {
+          this.logger.error(`Failed to parse base64 image: ${error?.message || error}`);
+        }
+      }
+    } else if (dataUrl && isURL(dataUrl)) {
+      buffer = await this.fetchBinaryFromUrl(dataUrl);
+    }
+
+    if (!buffer) {
+      try {
+        buffer = await downloadMediaMessage(
+          { key: msg.key, message: msg?.message },
+          'buffer',
+          {},
+          {
+            logger: P({ level: 'error' }) as any,
+            reuploadRequest: instance,
+          },
+        );
+      } catch (error) {
+        this.logger.error(`Failed to download image from WhatsApp: ${error?.message || error}`);
+      }
+    }
+
+    if (!buffer) {
+      return null;
+    }
+
+    try {
+      return await toPngDataUrl(buffer);
+    } catch (error) {
+      this.logger.error(`Failed to convert image to png: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  public async speechToTextSystem(msg: any, instance: any): Promise<string | null> {
+    const creds = await this.getInstanceCreds(instance?.instanceId);
+    const apiKey = creds?.apiKey || this.configService.get<OpenaiConfig>('OPENAI').API_KEY_GLOBAL;
+    if (!apiKey) {
+      this.logger.error('OpenAI API key not found for system speech-to-text');
+      return null;
+    }
+
+    let audio: Buffer | null = null;
+    const message = msg?.message || msg;
+
+    if (message?.mediaUrl && isURL(message.mediaUrl)) {
+      audio = await this.fetchBinaryFromUrl(message.mediaUrl);
+    } else if (message?.base64) {
+      audio = Buffer.from(message.base64, 'base64');
+    } else if (message?.audioMessage?.url && isURL(message.audioMessage.url)) {
+      audio = await this.fetchBinaryFromUrl(message.audioMessage.url);
+    }
+
+    if (!audio) {
+      audio = await downloadMediaMessage(
+        { key: msg.key, message: msg?.message },
+        'buffer',
+        {},
+        {
+          logger: P({ level: 'error' }) as any,
+          reuploadRequest: instance,
+        },
+      );
+    }
+
+    if (!audio) {
+      this.logger.error('Audio download failed for system speech-to-text');
+      return null;
+    }
+
+    if (audio.length === 0) {
+      this.logger.error('Audio buffer is empty for system speech-to-text');
+      return null;
+    }
+
+    let format = this.detectAudioFormat(audio);
+    if (!format) {
+      try {
+        const fallback = await downloadMediaMessage(
+          { key: msg.key, message: msg?.message },
+          'buffer',
+          {},
+          {
+            logger: P({ level: 'error' }) as any,
+            reuploadRequest: instance,
+          },
+        );
+        if (fallback && fallback.length > 0) {
+          audio = fallback;
+          format = this.detectAudioFormat(audio);
+        }
+      } catch (error) {
+        this.logger.error(`System audio fallback download failed: ${error?.message || error}`);
+      }
+    }
+
+    if (!format) {
+      this.logger.error('Audio format not recognized for system speech-to-text');
+      return null;
+    }
+
+    const formData = new FormData();
+    formData.append('file', audio, { filename: `audio.${format.ext}`, contentType: format.mime });
+    formData.append('model', 'whisper-1');
+
+    let response;
+    try {
+      response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `System speech-to-text failed: ${error?.response?.status} ${JSON.stringify(error?.response?.data || error)}`,
+      );
+      return null;
+    }
+
+    return response?.data?.text;
+  }
+
+  public async describeImageSystem(msg: any, instance: any): Promise<string | null> {
+    const creds = await this.getInstanceCreds(instance?.instanceId);
+    if (!creds) {
+      this.logger.error(`OpenAI credentials not found for instanceId: ${instance?.instanceId}`);
+      return null;
+    }
+
+    const apiKey = creds.apiKey || this.configService.get<OpenaiConfig>('OPENAI').API_KEY_GLOBAL;
+    if (!apiKey) {
+      this.logger.error('OpenAI API key not found for system image description');
+      return null;
+    }
+
+    this.initClient(apiKey);
+
+    const dataUrl = await this.buildVisionDataUrl(msg, instance);
+
+    if (!dataUrl) {
+      this.logger.error('Image source not found for system image description');
+      return null;
+    }
+
+    const response = await this.client.chat.completions.create({
+      model: this.getVisionModel(),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Describe the image briefly.' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+    });
+
+    return response?.choices?.[0]?.message?.content || null;
   }
 }

@@ -1,31 +1,43 @@
-version: "3.8"
-
 services:
   api:
     container_name: evolution_api
-    image: evoapicloud/evolution-api:latest
+    image: evolution/api:local
+    build: .
     restart: always
     depends_on:
       - redis
       - evolution-postgres
     ports:
-      - "127.0.0.1:8080:8080"
+      - "0.0.0.0:8080:8080"
     volumes:
       - evolution_instances:/evolution/instances
     networks:
       - evolution-net
-      - dokploy-network
     env_file:
-      - .env
+      - env.prod
     expose:
       - "8080"
 
-  frontend:
-    container_name: evolution_frontend
-    image: evoapicloud/evolution-manager:latest
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
     restart: always
     ports:
-      - "3000:80"
+      - "127.0.0.1:5678:5678"
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - N8N_RUNNERS_ENABLED=true
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${GENERIC_TIMEZONE}
+    env_file:
+      - env.prod
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./local-files:/files
     networks:
       - evolution-net
 
@@ -41,18 +53,15 @@ services:
       evolution-net:
         aliases:
           - evolution-redis
-      dokploy-network:
-        aliases:
-          - evolution-redis
     expose:
       - "6379"
 
   evolution-postgres:
     container_name: evolution_postgres
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     restart: always
     env_file:
-      - .env
+      - env.prod
     command:
       - postgres
       - -c
@@ -67,18 +76,35 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - evolution-net
-      - dokploy-network
+    ports:
+      - "5432:5432"
     expose:
       - "5432"
+
+  minio:
+    container_name: evolution_minio
+    image: minio/minio:latest
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY}
+    ports:
+      - "0.0.0.0:9000:9000"
+      - "0.0.0.0:9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - evolution-net
 
 volumes:
   evolution_instances:
   evolution_redis:
   postgres_data:
+  minio_data:
+  n8n_data:
 
 networks:
   evolution-net:
     name: evolution-net
     driver: bridge
-  dokploy-network:
-    external: true

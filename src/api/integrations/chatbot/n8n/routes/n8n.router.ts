@@ -5,6 +5,7 @@ import { HttpStatus } from '@api/routes/index.router';
 import { n8nController } from '@api/server.module';
 import {
   instanceSchema,
+  n8nEmitSchema,
   n8nIgnoreJidSchema,
   n8nSchema,
   n8nSettingSchema,
@@ -12,7 +13,7 @@ import {
 } from '@validate/validate.schema';
 import { RequestHandler, Router } from 'express';
 
-import { N8nDto, N8nSettingDto } from '../dto/n8n.dto';
+import { N8nDto, N8nEmitDto, N8nSettingDto } from '../dto/n8n.dto';
 
 export class N8nRouter extends RouterBroker {
   constructor(...guards: RequestHandler[]) {
@@ -95,7 +96,21 @@ export class N8nRouter extends RouterBroker {
           request: req,
           schema: instanceSchema,
           ClassRef: InstanceDto,
-          execute: (instance) => n8nController.fetchSessions(instance, req.params.n8nId),
+          execute: (instance) =>
+            n8nController.fetchSessions(
+              instance,
+              req.params.n8nId,
+              typeof req.query.remoteJid === 'string' ? req.query.remoteJid : undefined,
+            ),
+        });
+        res.status(HttpStatus.OK).json(response);
+      })
+      .post(this.routerPath('emitLastMessage'), ...guards, async (req, res) => {
+        const response = await this.dataValidate<N8nEmitDto>({
+          request: req,
+          schema: n8nEmitSchema,
+          ClassRef: N8nEmitDto,
+          execute: (instance, data) => n8nController.emitLastMessage(instance, data),
         });
         res.status(HttpStatus.OK).json(response);
       })

@@ -146,6 +146,10 @@ export const updateMessageSchema: JSONSchema7 = {
   properties: {
     number: { type: 'string' },
     text: { type: 'string' },
+    caption: { type: 'string' },
+    media: { type: 'string' },
+    mediatype: { type: 'string', enum: ['image', 'video', 'audio', 'document'] },
+    parseMode: { type: 'string', enum: ['Markdown', 'MarkdownV2', 'HTML'] },
     key: {
       type: 'object',
       properties: {
@@ -157,7 +161,9 @@ export const updateMessageSchema: JSONSchema7 = {
       ...isNotEmpty('id', 'remoteJid'),
     },
   },
-  ...isNotEmpty('number', 'text', 'key'),
+  required: ['number', 'key'],
+  anyOf: [{ required: ['text'] }, { required: ['caption'] }, { required: ['media'] }],
+  ...isNotEmpty('number', 'key'),
 };
 
 export const presenceSchema: JSONSchema7 = {
