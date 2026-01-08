@@ -1,8 +1,10 @@
 services:
   api:
     container_name: evolution_api
-    image: evolution/api:local
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crafty-back-api:local
     restart: always
     depends_on:
       - redis
@@ -14,7 +16,7 @@ services:
     networks:
       - evolution-net
     env_file:
-      - env.prod
+      - .env
     expose:
       - "8080"
 
@@ -28,13 +30,22 @@ services:
       - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
-      - N8N_RUNNERS_ENABLED=true
+      - N8N_RUNNERS_ENABLED=false
+      - N8N_EXPRESS_TRUST_PROXY=true
       - NODE_ENV=production
       - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
       - TZ=${GENERIC_TIMEZONE}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=evolution-postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=evolution_api
+      - DB_POSTGRESDB_USER=postgres
+      - DB_POSTGRESDB_PASSWORD=postgres
+      - DB_POSTGRESDB_SCHEMA=n8n
+      - DB_POSTGRESDB_POOL_SIZE=10
     env_file:
-      - env.prod
+      - .env
     volumes:
       - n8n_data:/home/node/.n8n
       - ./local-files:/files
@@ -61,7 +72,7 @@ services:
     image: pgvector/pgvector:pg15
     restart: always
     env_file:
-      - env.prod
+      - .env
     command:
       - postgres
       - -c
@@ -107,4 +118,4 @@ volumes:
 networks:
   evolution-net:
     name: evolution-net
-    driver: bridge
+    external: true
