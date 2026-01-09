@@ -9,7 +9,8 @@ services:
     command: server /data --console-address ":9001"
     restart: always
     ports:
-      - 5432:5432
+      - 127.0.0.1:9000:9000
+      - 127.0.0.1:9001:9001
     environment:
       - MINIO_ROOT_USER=USER
       - MINIO_ROOT_PASSWORD=PASSWORD
