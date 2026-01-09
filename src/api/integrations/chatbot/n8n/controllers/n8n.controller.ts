@@ -53,9 +53,7 @@ export class N8nController extends BaseChatbotController<N8nModel, N8nDto> {
   private async updatePromptFunnelCache(bot: N8nModel): Promise<void> {
     if (!this.cache || !bot?.instanceId || !bot?.id) return;
 
-    const funnel = bot.funnelId
-      ? await this.prismaRepository.funnel.findFirst({ where: { id: bot.funnelId } })
-      : null;
+    const funnel = bot.funnelId ? await this.prismaRepository.funnel.findFirst({ where: { id: bot.funnelId } }) : null;
     const payload = {
       prompt: bot.prompt || null,
       funnelId: bot.funnelId || null,
@@ -71,10 +69,7 @@ export class N8nController extends BaseChatbotController<N8nModel, N8nDto> {
     return url.trim() ? url.trim() : null;
   }
 
-  private applyWebhookDefaults(
-    data: N8nDto,
-    options?: { allowMissing?: boolean; useDefaultWhenMissing?: boolean },
-  ) {
+  private applyWebhookDefaults(data: N8nDto, options?: { allowMissing?: boolean; useDefaultWhenMissing?: boolean }) {
     const defaultWebhook = this.getDefaultWebhookUrl();
     const hasCustomWebhook = Boolean(data.webhookUrl && String(data.webhookUrl).trim());
     const missingWebhook = data.webhookUrl === undefined;
@@ -95,9 +90,9 @@ export class N8nController extends BaseChatbotController<N8nModel, N8nDto> {
     }
   }
 
-  private stripDefaultWebhook<T extends { webhookUrl?: string | null; basicAuthUser?: string | null; basicAuthPass?: string | null }>(
-    bot: T,
-  ): T {
+  private stripDefaultWebhook<
+    T extends { webhookUrl?: string | null; basicAuthUser?: string | null; basicAuthPass?: string | null },
+  >(bot: T): T {
     const defaultWebhook = this.getDefaultWebhookUrl();
     if (!defaultWebhook || !bot?.webhookUrl) return bot;
     if (bot.webhookUrl !== defaultWebhook) return bot;
@@ -130,11 +125,7 @@ export class N8nController extends BaseChatbotController<N8nModel, N8nDto> {
     };
   }
 
-  protected async validateNoDuplicatesOnUpdate(
-    botId: string,
-    instanceId: string,
-    data: N8nDto,
-  ): Promise<void> {
+  protected async validateNoDuplicatesOnUpdate(botId: string, instanceId: string, data: N8nDto): Promise<void> {
     const defaultWebhook = this.getDefaultWebhookUrl();
     if (defaultWebhook && data.webhookUrl === defaultWebhook) {
       return;

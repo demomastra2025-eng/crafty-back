@@ -8,7 +8,10 @@ import { FunnelDto, FunnelSessionDto } from '../dto/funnel.dto';
 export class FunnelService {
   private readonly logger = new Logger('FunnelService');
 
-  constructor(private readonly prismaRepository: PrismaRepository, private readonly cache?: CacheService) {}
+  constructor(
+    private readonly prismaRepository: PrismaRepository,
+    private readonly cache?: CacheService,
+  ) {}
 
   private promptCacheKey(instanceId: string): string {
     return `prompt-funnel:${instanceId}`;
@@ -56,7 +59,7 @@ export class FunnelService {
       try {
         const parsed = JSON.parse(stages);
         return Array.isArray(parsed) ? (parsed as Array<Record<string, any>>) : undefined;
-      } catch (error) {
+      } catch {
         this.logger.warn('Failed to parse funnel stages JSON');
         return undefined;
       }
@@ -210,7 +213,7 @@ export class FunnelService {
         updateData.funnelStage = 0;
         updateData.followUpStage = 0;
         updateData.funnelEnable = true;
-        updateData.followUpEnable = data.followUpEnable ?? (funnel.followUpEnable ?? true);
+        updateData.followUpEnable = data.followUpEnable ?? funnel.followUpEnable ?? true;
       } else {
         updateData.funnelId = null;
         updateData.funnelStage = null;

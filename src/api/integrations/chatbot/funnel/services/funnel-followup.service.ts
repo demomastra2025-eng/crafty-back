@@ -45,7 +45,7 @@ export class FunnelFollowUpService {
       try {
         const parsed = JSON.parse(stages);
         return Array.isArray(parsed) ? (parsed as Array<Record<string, any>>) : [];
-      } catch (error) {
+      } catch {
         this.logger.warn('Failed to parse funnel stages JSON');
         return [];
       }
@@ -61,9 +61,7 @@ export class FunnelFollowUpService {
       const title = stage?.title ? String(stage.title) : `Stage ${stageNumber}`;
       const objective = stage?.objective ? String(stage.objective) : undefined;
       const logicStage = stage?.logicStage ? String(stage.logicStage) : undefined;
-      const commonTouchCondition = stage?.commonTouchCondition
-        ? String(stage.commonTouchCondition)
-        : undefined;
+      const commonTouchCondition = stage?.commonTouchCondition ? String(stage.commonTouchCondition) : undefined;
       touches.forEach((touch: Record<string, any>, idx: number) => {
         const delayMin = Number(touch?.delayMin);
         if (!Number.isFinite(delayMin) || delayMin < 0) return;

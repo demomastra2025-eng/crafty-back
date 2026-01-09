@@ -980,7 +980,10 @@ export class BaileysStartupService extends ChannelStartupService {
 
           if (this.configService.get<Database>('DATABASE').SAVE_DATA.CONTACTS)
             await this.prismaRepository.contact.createMany({
-              data: normalizedContacts.map(({ rawJid, ...contact }) => contact),
+              data: normalizedContacts.map(({ rawJid, ...contact }) => {
+                void rawJid;
+                return contact;
+              }),
               skipDuplicates: true,
             });
 
@@ -1006,7 +1009,10 @@ export class BaileysStartupService extends ChannelStartupService {
         ) {
           this.chatwootService.addHistoryContacts(
             { instanceName: this.instance.name, instanceId: this.instance.id },
-            normalizedContacts.map(({ rawJid, ...contact }) => contact),
+            normalizedContacts.map(({ rawJid, ...contact }) => {
+              void rawJid;
+              return contact;
+            }),
           );
           chatwootImport.importHistoryContacts(
             { instanceName: this.instance.name, instanceId: this.instance.id },
@@ -1539,10 +1545,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
           // Audio transcription is handled after S3 upload (when mediaUrl is available)
 
-          const chatRemoteJid = await this.normalizeRemoteJid(
-            messageRaw.key.remoteJid,
-            messageRaw.key.remoteJidAlt,
-          );
+          const chatRemoteJid = await this.normalizeRemoteJid(messageRaw.key.remoteJid, messageRaw.key.remoteJidAlt);
 
           if (chatRemoteJid) {
             messageRaw.key.remoteJid = chatRemoteJid;
@@ -2807,7 +2810,10 @@ export class BaileysStartupService extends ChannelStartupService {
               messageRaw.message.mediaUrl = mediaUrl;
 
               if (this.configService.get<Openai>('OPENAI').ENABLED) {
-                if (messageRaw.message.imageMessage || messageRaw.message?.associatedChildMessage?.message?.imageMessage) {
+                if (
+                  messageRaw.message.imageMessage ||
+                  messageRaw.message?.associatedChildMessage?.message?.imageMessage
+                ) {
                   try {
                     const caption = await this.openaiService.describeImageSystem(messageRaw, this);
                     if (caption) {
@@ -4030,11 +4036,7 @@ export class BaileysStartupService extends ChannelStartupService {
     try {
       const keys: proto.IMessageKey[] = [];
       data.readMessages.forEach((read) => {
-        if (
-          isJidGroup(read.remoteJid) ||
-          isPnUser(read.remoteJid) ||
-          read.remoteJid?.endsWith('@s.whatsapp.net')
-        ) {
+        if (isJidGroup(read.remoteJid) || isPnUser(read.remoteJid) || read.remoteJid?.endsWith('@s.whatsapp.net')) {
           keys.push({ remoteJid: read.remoteJid, fromMe: read.fromMe, id: read.id });
         }
       });
@@ -4211,7 +4213,10 @@ export class BaileysStartupService extends ChannelStartupService {
       if ('messageContextInfo' in msg.message && Object.keys(msg.message).length === 1) {
         if (m?.key) {
           const fullMsg = (await this.getMessage(m.key, true)) as proto.IWebMessageInfo;
-          if (fullMsg?.message && !(Object.keys(fullMsg.message).length === 1 && 'messageContextInfo' in fullMsg.message)) {
+          if (
+            fullMsg?.message &&
+            !(Object.keys(fullMsg.message).length === 1 && 'messageContextInfo' in fullMsg.message)
+          ) {
             msg = fullMsg;
           }
         }
@@ -5141,9 +5146,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
     if (chat && chat.unreadMessages !== unreadMessages) {
       await this.prismaRepository.chat.update({ where: { id: chat.id }, data: { unreadMessages } });
-      this.sendDataWebhook(Events.CHATS_UPDATE, [
-        { remoteJid, instanceId: this.instanceId, unreadMessages },
-      ]);
+      this.sendDataWebhook(Events.CHATS_UPDATE, [{ remoteJid, instanceId: this.instanceId, unreadMessages }]);
     }
 
     return unreadMessages;

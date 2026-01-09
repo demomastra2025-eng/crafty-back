@@ -1,8 +1,8 @@
 import { prismaRepository } from '@api/server.module';
 import { Auth, configService } from '@config/env.config';
 import { UnauthorizedException } from '@exceptions';
-import jwt from 'jsonwebtoken';
 import { NextFunction, Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 
 type JwtPayload = {
   userId: string;

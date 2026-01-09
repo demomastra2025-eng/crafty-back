@@ -13,10 +13,10 @@ import fs from 'fs';
 import mimeTypes from 'mime-types';
 import path from 'path';
 
+import { AuthRouter } from './auth.router';
 import { BusinessRouter } from './business.router';
 import { CallRouter } from './call.router';
 import { ChatRouter } from './chat.router';
-import { AuthRouter } from './auth.router';
 import { CompanyRouter } from './company.router';
 import { GroupRouter } from './group.router';
 import { InstanceRouter } from './instance.router';

@@ -3,10 +3,10 @@ import { Chatwoot, configService, ProviderSession } from '@config/env.config';
 import { eventEmitter } from '@config/event.config';
 import { Logger } from '@config/logger.config';
 
+import { AuthController } from './controllers/auth.controller';
 import { BusinessController } from './controllers/business.controller';
 import { CallController } from './controllers/call.controller';
 import { ChatController } from './controllers/chat.controller';
-import { AuthController } from './controllers/auth.controller';
 import { CompanyController } from './controllers/company.controller';
 import { GroupController } from './controllers/group.controller';
 import { InstanceController } from './controllers/instance.controller';
@@ -29,11 +29,11 @@ import { EvoaiController } from './integrations/chatbot/evoai/controllers/evoai.
 import { EvoaiService } from './integrations/chatbot/evoai/services/evoai.service';
 import { EvolutionBotController } from './integrations/chatbot/evolutionBot/controllers/evolutionBot.controller';
 import { EvolutionBotService } from './integrations/chatbot/evolutionBot/services/evolutionBot.service';
-import { FunnelController } from './integrations/chatbot/funnel/controllers/funnel.controller';
-import { FunnelFollowUpService } from './integrations/chatbot/funnel/services/funnel-followup.service';
-import { FunnelService } from './integrations/chatbot/funnel/services/funnel.service';
 import { FlowiseController } from './integrations/chatbot/flowise/controllers/flowise.controller';
 import { FlowiseService } from './integrations/chatbot/flowise/services/flowise.service';
+import { FunnelController } from './integrations/chatbot/funnel/controllers/funnel.controller';
+import { FunnelService } from './integrations/chatbot/funnel/services/funnel.service';
+import { FunnelFollowUpService } from './integrations/chatbot/funnel/services/funnel-followup.service';
 import { N8nController } from './integrations/chatbot/n8n/controllers/n8n.controller';
 import { N8nService } from './integrations/chatbot/n8n/services/n8n.service';
 import { OpenaiController } from './integrations/chatbot/openai/controllers/openai.controller';

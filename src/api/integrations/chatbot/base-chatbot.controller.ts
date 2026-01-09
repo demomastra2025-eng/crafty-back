@@ -1,10 +1,10 @@
 import { IgnoreJidDto } from '@api/dto/chatbot.dto';
 import { InstanceDto } from '@api/dto/instance.dto';
+import { setLastInboundKeyId } from '@api/integrations/chatbot/session-cache';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Events } from '@api/types/wa.types';
 import { Logger } from '@config/logger.config';
-import { setLastInboundKeyId } from '@api/integrations/chatbot/session-cache';
 import { BadRequestException } from '@exceptions';
 import { TriggerOperator, TriggerType } from '@prisma/client';
 import { getConversationMessage } from '@utils/getConversationMessage';

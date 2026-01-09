@@ -125,6 +125,4 @@ export class CompanyController {
     }
     return { apiKey: decryptApiKey(key.encryptedKey, key.keyIv) };
   }
-
-  
 }

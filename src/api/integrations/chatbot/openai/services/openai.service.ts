@@ -1,7 +1,7 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Integration } from '@api/types/wa.types';
-import { ConfigService, Language, Openai as OpenaiConfig } from '@config/env.config';
+import { ConfigService, Openai as OpenaiConfig } from '@config/env.config';
 import { IntegrationSession, OpenaiBot, OpenaiCreds, OpenaiSetting } from '@prisma/client';
 import { sendTelemetry } from '@utils/sendTelemetry';
 import axios from 'axios';
@@ -826,7 +826,7 @@ export class OpenaiService extends BaseChatbotService<OpenaiBot, OpenaiSetting> 
   }
 
   private async buildVisionDataUrl(msg: any, instance: any): Promise<string | null> {
-    let { dataUrl } = this.resolveImageSource(msg);
+    const { dataUrl } = this.resolveImageSource(msg);
 
     const toPngDataUrl = async (buffer: Buffer) => {
       const png = await sharp(buffer).png().toBuffer();

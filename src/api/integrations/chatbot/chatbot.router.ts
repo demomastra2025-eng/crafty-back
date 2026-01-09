@@ -6,8 +6,8 @@ import { Router } from 'express';
 
 import { EvoaiRouter } from './evoai/routes/evoai.router';
 import { EvolutionBotRouter } from './evolutionBot/routes/evolutionBot.router';
-import { FunnelRouter } from './funnel/routes/funnel.router';
 import { FlowiseRouter } from './flowise/routes/flowise.router';
+import { FunnelRouter } from './funnel/routes/funnel.router';
 import { N8nRouter } from './n8n/routes/n8n.router';
 
 export class ChatbotRouter {

@@ -2,8 +2,7 @@ import { RouterBroker } from '@api/abstract/abstract.router';
 import { InstanceDto } from '@api/dto/instance.dto';
 import { HttpStatus } from '@api/routes/index.router';
 import { funnelController } from '@api/server.module';
-import { instanceSchema } from '@validate/validate.schema';
-import { funnelSchema, funnelSessionSchema, funnelUpdateSchema } from '@validate/validate.schema';
+import { funnelSchema, funnelSessionSchema, funnelUpdateSchema, instanceSchema } from '@validate/validate.schema';
 import { RequestHandler, Router } from 'express';
 
 import { FunnelDto, FunnelSessionDto } from '../dto/funnel.dto';

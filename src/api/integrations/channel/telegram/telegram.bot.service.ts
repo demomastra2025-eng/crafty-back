@@ -258,7 +258,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
     return false;
   }
 
-  protected async messageHandle(update: TelegramUpdate, database: Database) {
+  protected async messageHandle(update: TelegramUpdate) {
     try {
       const message =
         update.message || update.edited_message || update.channel_post || update.edited_channel_post || null;
@@ -281,7 +281,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
       const remoteJid = this.normalizeRemoteJid(chatId);
       const pushName = [from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || '';
 
-      let messageRaw: any = {
+      const messageRaw: any = {
         key: {
           id: String(message?.message_id || callbackQuery?.message?.message_id || update.update_id),
           remoteJid,
@@ -364,7 +364,9 @@ export class TelegramBotStartupService extends ChannelStartupService {
         messageRaw.messageType = 'locationMessage';
       } else if (message?.contact) {
         messageRaw.message = {
-          contactMessage: { displayName: `${message.contact.first_name || ''} ${message.contact.last_name || ''}`.trim() },
+          contactMessage: {
+            displayName: `${message.contact.first_name || ''} ${message.contact.last_name || ''}`.trim(),
+          },
         };
         messageRaw.messageType = 'contactMessage';
       } else {
@@ -446,7 +448,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
       this.loadSettings();
       this.loadWebhook();
       await this.ensureBotProfileName();
-      await this.messageHandle(data, this.configService.get<Database>('DATABASE'));
+      await this.messageHandle(data);
     } catch (error) {
       this.logger.error(error);
       throw new BadRequestException(error?.toString());
@@ -881,9 +883,11 @@ export class TelegramBotStartupService extends ChannelStartupService {
     return messageRaw;
   }
   public async listMessage(_data: SendListDto) {
+    void _data;
     throw new BadRequestException('Method not available on Telegram Bot API');
   }
   public async templateMessage(_data: SendTemplateDto) {
+    void _data;
     throw new BadRequestException('Method not available on Telegram Bot API');
   }
   public async reactionMessage(_data: SendReactionDto) {
@@ -893,9 +897,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
       throw new BadRequestException('Message ID is required');
     }
 
-    const reaction = _data.reaction
-      ? [{ type: 'emoji', emoji: _data.reaction }]
-      : [];
+    const reaction = _data.reaction ? [{ type: 'emoji', emoji: _data.reaction }] : [];
 
     return await this.apiRequest<any>('setMessageReaction', {
       chat_id: chatId,

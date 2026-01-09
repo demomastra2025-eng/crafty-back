@@ -1,5 +1,5 @@
-import crypto from 'crypto';
 import { Auth, configService } from '@config/env.config';
+import crypto from 'crypto';
 
 const IV_BYTES = 12;
 

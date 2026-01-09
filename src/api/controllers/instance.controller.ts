@@ -262,18 +262,18 @@ export class InstanceController {
       }
 
       return {
-          instance: {
-            instanceName: instance.instanceName,
-            instanceId: instanceId,
-            integration: instanceData.integration,
-            webhookWaBusiness,
-            accessTokenWaBusiness,
-            webhookTelegram,
-            status:
-              typeof instance.connectionStatus === 'string'
-                ? instance.connectionStatus
-                : instance.connectionStatus?.state || 'unknown',
-          },
+        instance: {
+          instanceName: instance.instanceName,
+          instanceId: instanceId,
+          integration: instanceData.integration,
+          webhookWaBusiness,
+          accessTokenWaBusiness,
+          webhookTelegram,
+          status:
+            typeof instance.connectionStatus === 'string'
+              ? instance.connectionStatus
+              : instance.connectionStatus?.state || 'unknown',
+        },
         hash,
         webhook: {
           webhookUrl: instanceData?.webhook?.url,

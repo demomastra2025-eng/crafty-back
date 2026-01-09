@@ -1,8 +1,8 @@
 import { InstanceDto } from '@api/dto/instance.dto';
+import { setLastInboundKeyId } from '@api/integrations/chatbot/session-cache';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Integration } from '@api/types/wa.types';
-import { setLastInboundKeyId } from '@api/integrations/chatbot/session-cache';
 import { ConfigService } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { IntegrationSession } from '@prisma/client';
@@ -411,6 +411,7 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     messageTimestamp?: number,
     followUpMode: boolean = false,
   ): Promise<void> {
+    void followUpMode;
     if (!session?.id) return;
 
     const currentContext =
@@ -431,10 +432,9 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     });
   }
 
-  protected async shouldSendResponse(
-    _session?: IntegrationSession,
-    _responseKeyId?: string,
-  ): Promise<boolean> {
+  protected async shouldSendResponse(_session?: IntegrationSession, _responseKeyId?: string): Promise<boolean> {
+    void _session;
+    void _responseKeyId;
     return true;
   }
 
