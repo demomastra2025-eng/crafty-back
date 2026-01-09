@@ -42,9 +42,7 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
   }
 
   private mergePrompt(parts: Array<string | null | undefined>): string | null {
-    const cleaned = parts
-      .map((part) => (typeof part === 'string' ? part.trim() : ''))
-      .filter((part) => Boolean(part));
+    const cleaned = parts.map((part) => (typeof part === 'string' ? part.trim() : '')).filter((part) => Boolean(part));
     if (!cleaned.length) return null;
     return cleaned.join('\n\n');
   }
@@ -183,6 +181,7 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
         agentPrompt: mergedPrompt,
         funnelId: funnelPayload?.id || n8n?.funnelId || null,
         instanceName: instance.instanceName,
+        instanceId: instance.instanceId,
         serverUrl: this.configService.get<HttpServer>('SERVER').URL,
         apiKey: instance.token,
       };
@@ -243,8 +242,7 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
 
     const userCaption =
       msg?.message?.imageMessage?.caption || msg?.message?.viewOnceMessageV2?.message?.imageMessage?.caption;
-    const aiCaption =
-      msg?.message?.imageCaption || msg?.message?.viewOnceMessageV2?.message?.imageCaption || undefined;
+    const aiCaption = msg?.message?.imageCaption || msg?.message?.viewOnceMessageV2?.message?.imageCaption || undefined;
 
     if (!userCaption && !aiCaption) return content;
 
@@ -289,10 +287,10 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
       const objective = step?.objective ?? null;
       const title = step?.title ?? null;
       const systemFollowUpMessage =
-        `Follow-up: продолжи диалог на этапе ${stageLabel ?? "—"}` +
-        (touchLabel ? `, касание ${touchLabel}` : "") +
-        `. Этап: ${commonTouchCondition || "—"}. Касание: ${touchCondition || "—"}.` +
-        ` Логика: ${logicStage || "—"}. Цель: ${objective || "—"}.`;
+        `Follow-up: продолжи диалог на этапе ${stageLabel ?? '—'}` +
+        (touchLabel ? `, касание ${touchLabel}` : '') +
+        `. Этап: ${commonTouchCondition || '—'}. Касание: ${touchCondition || '—'}.` +
+        ` Логика: ${logicStage || '—'}. Цель: ${objective || '—'}.`;
 
       const payload: any = {
         event: 'followup',
@@ -314,6 +312,7 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
         sessionId: session.id,
         remoteJid: session.remoteJid,
         instanceName: instance.instanceName,
+        instanceId: instance.instanceId,
         serverUrl: this.configService.get<HttpServer>('SERVER').URL,
         apiKey: instance.token,
       };
@@ -326,7 +325,9 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
 
       this.logger.log(`[N8n] Sending follow-up step ${stepIndex + 1} to ${endpoint}`);
       const response = await axios.post(endpoint, payload, { headers, timeout: 60000 });
-      this.logger.log(`[N8n] Follow-up response status: ${response?.status}, data: ${JSON.stringify(response?.data ?? {})}`);
+      this.logger.log(
+        `[N8n] Follow-up response status: ${response?.status}, data: ${JSON.stringify(response?.data ?? {})}`,
+      );
       const message = response?.data?.output || response?.data?.answer;
 
       await this.sendMessageWhatsApp(instance, session.remoteJid, message, settings, true, session, undefined, true);
