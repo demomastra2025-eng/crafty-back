@@ -71,7 +71,10 @@ services:
 
   evolution-postgres:
     container_name: evolution_postgres
-    image: pgvector/pgvector:pg15
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+    image: evolution-postgres:pg15-cron
     restart: always
     env_file:
       - .env
@@ -81,6 +84,10 @@ services:
       - max_connections=1000
       - -c
       - listen_addresses=*
+      - -c
+      - shared_preload_libraries=pg_cron
+      - -c
+      - cron.database_name=evolution_api
     environment:
       - POSTGRES_DB=${POSTGRES_DATABASE}
       - POSTGRES_USER=${POSTGRES_USERNAME}
