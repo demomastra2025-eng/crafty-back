@@ -15,6 +15,7 @@ services:
       - evolution_instances:/evolution/instances
     networks:
       - evolution-net
+      - frontend-internal
     env_file:
       - .env
     expose:
@@ -31,7 +32,7 @@ services:
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
       - N8N_RUNNERS_ENABLED=false
-      - N8N_EXPRESS_TRUST_PROXY=true
+      - N8N_PROXY_HOPS=1
       - NODE_ENV=production
       - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
@@ -51,6 +52,7 @@ services:
       - ./local-files:/files
     networks:
       - evolution-net
+      - frontend-internal
 
   redis:
     container_name: evolution_redis
@@ -87,6 +89,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - evolution-net
+      - frontend-internal
     ports:
       - "127.0.0.1:5432:5432"
     expose:
@@ -108,6 +111,24 @@ services:
     networks:
       - evolution-net
 
+  db-backup:
+    container_name: evolution_db_backup
+    image: prodrigestivill/postgres-backup-local:16
+    restart: always
+    environment:
+      - POSTGRES_HOST=evolution-postgres
+      - POSTGRES_DB=${POSTGRES_DATABASE}
+      - POSTGRES_USER=${POSTGRES_USERNAME}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - SCHEDULE=0 3 * * *
+      - BACKUP_KEEP_DAYS=7
+      - BACKUP_KEEP_WEEKS=4
+      - BACKUP_KEEP_MONTHS=6
+    volumes:
+      - ./backups:/backups
+    networks:
+      - evolution-net
+
 volumes:
   evolution_instances:
   evolution_redis:
@@ -118,4 +139,6 @@ volumes:
 networks:
   evolution-net:
     name: evolution-net
+    external: true
+  frontend-internal:
     external: true
