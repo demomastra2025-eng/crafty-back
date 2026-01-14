@@ -1,7 +1,10 @@
 services:
   api:
     image: evolution/api:local
-    build: .
+    build:
+      context: .
+      args:
+        SKIP_BUILD: "true"
     restart: always
     depends_on:
       - redis
@@ -14,6 +17,8 @@ services:
       - evolution-net
     env_file:
       - .env
+    environment:
+      - START_COMMAND=start
     expose:
       - 8080
 
@@ -55,7 +60,10 @@ services:
       - "6379"
 
   evolution-postgres:
-    image: postgres:15
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+    image: evolution-postgres:pg15-cron
     restart: always
     env_file:
       - .env
@@ -65,6 +73,10 @@ services:
       - max_connections=1000
       - -c
       - listen_addresses=*
+      - -c
+      - shared_preload_libraries=pg_cron
+      - -c
+      - cron.database_name=evolution_api
     environment:
       - POSTGRES_DB=${POSTGRES_DATABASE}
       - POSTGRES_USER=${POSTGRES_USERNAME}
