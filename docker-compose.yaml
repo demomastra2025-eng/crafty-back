@@ -69,6 +69,23 @@ services:
     expose:
       - "6379"
 
+  evolution-rabbitmq:
+    container_name: evolution_rabbitmq
+    image: rabbitmq:3-management
+    restart: always
+    command: rabbitmq-server
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - evolution-net
+    expose:
+      - "5672"
+      - "15672"
+
   evolution-postgres:
     container_name: evolution_postgres
     build:
