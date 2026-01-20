@@ -14,6 +14,7 @@ export class Options {
   mentionsEveryOne?: boolean;
   mentioned?: string[];
   webhookUrl?: string;
+  author?: string;
 }
 
 export class MediaMessage {
@@ -45,6 +46,7 @@ export class Metadata {
   mentioned?: string[];
   encoding?: boolean;
   notConvertSticker?: boolean;
+  author?: string;
 }
 
 export class SendTextDto extends Metadata {

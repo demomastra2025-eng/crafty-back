@@ -1,10 +1,7 @@
 services:
   api:
     image: evolution/api:local
-    build:
-      context: .
-      args:
-        SKIP_BUILD: "true"
+    build: .
     restart: always
     depends_on:
       - redis
@@ -17,8 +14,6 @@ services:
       - evolution-net
     env_file:
       - .env
-    environment:
-      - START_COMMAND=start
     expose:
       - 8080
 

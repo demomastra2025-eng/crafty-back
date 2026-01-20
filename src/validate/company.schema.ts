@@ -25,7 +25,16 @@ export const companyCreateSchema: JSONSchema7 = {
   type: 'object',
   properties: {
     name: { type: 'string' },
+    agnoPorts: { type: 'array', items: { type: 'integer', minimum: 1 } },
   },
   required: ['name'],
   ...isNotEmpty('name'),
+};
+
+export const companyUpdateSchema: JSONSchema7 = {
+  $id: v4(),
+  type: 'object',
+  properties: {
+    agnoPorts: { type: 'array', items: { type: 'integer', minimum: 1 } },
+  },
 };

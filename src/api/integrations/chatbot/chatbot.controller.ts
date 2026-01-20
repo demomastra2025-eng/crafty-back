@@ -1,14 +1,6 @@
 import { InstanceDto } from '@api/dto/instance.dto';
 import { PrismaRepository } from '@api/repository/repository.service';
-import {
-  difyController,
-  evoaiController,
-  evolutionBotController,
-  flowiseController,
-  n8nController,
-  openaiController,
-  typebotController,
-} from '@api/server.module';
+import { agnoController } from '@api/server.module';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Logger } from '@config/logger.config';
 import { IntegrationSession } from '@prisma/client';
@@ -91,19 +83,7 @@ export class ChatbotController {
       pushName,
       isIntegration,
     };
-    evolutionBotController.emit(emitData);
-
-    typebotController.emit(emitData);
-
-    openaiController.emit(emitData);
-
-    difyController.emit(emitData);
-
-    n8nController.emit(emitData);
-
-    evoaiController.emit(emitData);
-
-    flowiseController.emit(emitData);
+    agnoController.emit(emitData);
   }
 
   public processDebounce(
@@ -171,22 +151,23 @@ export class ChatbotController {
     return false;
   }
 
-  public async getSession(remoteJid: string, instance: InstanceDto) {
-    let session = await this.prismaRepository.integrationSession.findFirst({
+  public async getSession(remoteJid: string, instance: InstanceDto, type?: string) {
+    const session = await this.prismaRepository.integrationSession.findFirst({
       where: {
         remoteJid: remoteJid,
         instanceId: instance.instanceId,
+        ...(type ? { type } : {}),
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    if (session) {
-      if (session.status !== 'closed' && !session.botId) {
-        this.logger.warn('Session is already opened in another integration');
-        return null;
-      } else if (!session.botId) {
-        session = null;
-      }
+    if (session?.status === 'closed') {
+      return null;
+    }
+
+    if (session && !session.botId) {
+      this.logger.warn('Session is already opened in another integration');
+      return null;
     }
 
     return session;

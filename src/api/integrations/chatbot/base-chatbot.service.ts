@@ -7,6 +7,8 @@ import { ConfigService } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { IntegrationSession } from '@prisma/client';
 
+import { SessionMessagesCache } from './session-messages-cache';
+
 /**
  * Base class for all chatbot service implementations
  * Contains common methods shared across different chatbot integrations
@@ -16,6 +18,7 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
   protected readonly waMonitor: WAMonitoringService;
   protected readonly prismaRepository: PrismaRepository;
   protected readonly configService?: ConfigService;
+  private sessionMessagesCache?: SessionMessagesCache;
 
   constructor(
     waMonitor: WAMonitoringService,
@@ -27,6 +30,71 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     this.prismaRepository = prismaRepository;
     this.logger = new Logger(loggerName);
     this.configService = configService;
+    if (this.configService) {
+      this.sessionMessagesCache = new SessionMessagesCache(this.configService);
+    }
+  }
+
+  protected async updateSession(sessionId: string, data: Record<string, any>) {
+    const updated = await this.prismaRepository.integrationSession.update({
+      where: { id: sessionId },
+      data,
+    });
+
+    if (data.status === 'opened') {
+      await this.cacheRecentSessionMessages(sessionId);
+    }
+    if (data.status === 'paused' || data.status === 'closed') {
+      await this.clearSessionMessagesCache(sessionId);
+    }
+
+    return updated;
+  }
+
+  private sanitizeSessionMessage(message: { message: any; author?: string; messageTimestamp?: number }) {
+    const raw = message?.message;
+    if (!raw || typeof raw !== 'object') {
+      return message;
+    }
+    const sanitized = { ...raw };
+    if ('messageContextInfo' in sanitized) {
+      delete sanitized.messageContextInfo;
+    }
+    return { ...message, message: sanitized };
+  }
+
+  private sanitizeSessionMessages(messages: Array<{ message: any; author?: string; messageTimestamp?: number }>) {
+    return messages.map((item) => this.sanitizeSessionMessage(item));
+  }
+
+  private async cacheRecentSessionMessages(sessionId: string) {
+    if (!this.sessionMessagesCache) return;
+    const messages = await this.prismaRepository.message.findMany({
+      where: { sessionId },
+      orderBy: { messageTimestamp: 'desc' },
+      take: 10,
+      select: {
+        message: true,
+        author: true,
+        messageTimestamp: true,
+      },
+    });
+
+    const sorted = messages.slice().reverse();
+    const sanitized = this.sanitizeSessionMessages(sorted);
+    await this.sessionMessagesCache.set(`session:${sessionId}:messages`, sanitized);
+  }
+
+  protected async clearSessionMessagesCache(sessionId: string) {
+    if (!this.sessionMessagesCache) return;
+    await this.sessionMessagesCache.delete(`session:${sessionId}:messages`);
+  }
+
+  protected async getSessionMessagesCache(sessionId: string) {
+    if (!this.sessionMessagesCache) return [];
+    const cached = await this.sessionMessagesCache.get(`session:${sessionId}:messages`);
+    if (!Array.isArray(cached)) return [];
+    return this.sanitizeSessionMessages(cached);
   }
 
   /**
@@ -88,6 +156,21 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
       // Extract remoteJid safely
       const remoteJidValue =
         typeof data.remoteJid === 'object' && data.remoteJid?.remoteJid ? data.remoteJid.remoteJid : data.remoteJid;
+
+      const existingSession = await this.prismaRepository.integrationSession.findFirst({
+        where: {
+          instanceId: instance.instanceId,
+          remoteJid: remoteJidValue,
+          botId: data.botId,
+          type: type,
+          status: { not: 'closed' },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (existingSession) {
+        return { session: existingSession };
+      }
 
       const session = await this.prismaRepository.integrationSession.create({
         data: {
@@ -164,15 +247,7 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
       await this.sendMessageToBot(instance, session, settings, bot, remoteJid, pushName || '', content, msg);
 
       // Update session to indicate we're waiting for user response
-      await this.prismaRepository.integrationSession.update({
-        where: {
-          id: session.id,
-        },
-        data: {
-          status: 'opened',
-          awaitUser: true,
-        },
-      });
+      await this.updateSession(session.id, { status: 'opened', awaitUser: true });
     } catch (error) {
       this.logger.error(`Error in process: ${error}`);
       return;
@@ -196,6 +271,7 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     if (!message) return;
 
     const linkRegex = /!?\[(.*?)\]\((.*?)\)/g;
+    const author = followUpMode ? 'followup' : 'agent';
     let textBuffer = '';
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -238,9 +314,11 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
               delay: (settings as any)?.delayMessage || 1000,
               audio: url,
               caption: altText,
+              author,
             });
             await this.attachSessionToMessage(sent?.key?.id, instance.instanceId, session?.id);
             await this.updateOutboundContext(session, sent?.messageTimestamp, followUpMode);
+            await this.cacheOutboundAuthor(instance, sent?.key?.id, author);
           } else {
             const sent = await instance.mediaMessage(
               {
@@ -250,12 +328,14 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
                 media: url,
                 caption: altText,
                 fileName: mediaType === 'document' ? altText || 'document' : undefined,
+                author,
               },
               null,
               false,
             );
             await this.attachSessionToMessage(sent?.key?.id, instance.instanceId, session?.id);
             await this.updateOutboundContext(session, sent?.messageTimestamp, followUpMode);
+            await this.cacheOutboundAuthor(instance, sent?.key?.id, author);
           }
         } catch (error) {
           this.logger.error(`Error sending media: ${error}`);
@@ -319,6 +399,7 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     const minDelay = 1000;
     const maxDelay = 20000;
     const delay = Math.min(Math.max(message.length * timePerChar, minDelay), maxDelay);
+    const author = followUpMode ? 'followup' : 'agent';
 
     this.logger.debug(`[BaseChatbot] Sending single message with linkPreview: ${linkPreview}`);
 
@@ -339,11 +420,13 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
             delay: settings?.delayMessage || 1000,
             text: message,
             linkPreview,
+            author,
           },
           false,
         );
         await this.attachSessionToMessage(sent?.key?.id, instance.instanceId, session?.id);
         await this.updateOutboundContext(session, sent?.messageTimestamp, followUpMode);
+        await this.cacheOutboundAuthor(instance, sent?.key?.id, author);
         resolve();
       }, delay);
     });
@@ -432,6 +515,11 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
     });
   }
 
+  protected async cacheOutboundAuthor(instance: any, messageId?: string, author?: string) {
+    if (!instance?.instanceId || !messageId || !author) return;
+    await this.waMonitor.cacheMessageAuthor(instance.instanceId, messageId, author);
+  }
+
   protected async shouldSendResponse(_session?: IntegrationSession, _responseKeyId?: string): Promise<boolean> {
     void _session;
     void _responseKeyId;
@@ -493,18 +581,13 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
 
     // Update session status to opened
     const funnelId = (bot as any)?.funnelId || null;
-    await this.prismaRepository.integrationSession.update({
-      where: {
-        id: session.id,
-      },
-      data: {
-        status: 'opened',
-        awaitUser: false,
-        ...(funnelId
-          ? { funnelId, funnelEnable: true, followUpEnable: true, funnelStage: null, followUpStage: null }
-          : { funnelEnable: false }),
-        ...(nextContext ? { context: nextContext } : {}),
-      },
+    await this.updateSession(session.id, {
+      status: 'opened',
+      awaitUser: false,
+      ...(funnelId
+        ? { funnelId, funnelEnable: true, followUpEnable: true, funnelStage: null, followUpStage: null }
+        : { funnelEnable: false }),
+      ...(nextContext ? { context: nextContext } : {}),
     });
     if (incomingKey) {
       setLastInboundKeyId(session.id, incomingKey);
@@ -550,7 +633,7 @@ export abstract class BaseChatbotService<BotType = any, SettingsType = any> {
   }
 
   /**
-   * Get the bot type identifier (e.g., 'dify', 'n8n', 'evoai')
+   * Get the bot type identifier
    * This should match the type field used in the IntegrationSession
    */
   protected abstract getBotType(): string;

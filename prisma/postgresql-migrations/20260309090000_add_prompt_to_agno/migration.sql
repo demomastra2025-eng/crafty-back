@@ -1,0 +1,2 @@
+ALTER TABLE "Agno"
+  ADD COLUMN "prompt" TEXT;

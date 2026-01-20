@@ -1,5 +1,6 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
+import { Events } from '@api/types/wa.types';
 import { configService, Log, Rabbitmq } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import * as amqp from 'amqplib/callback_api';
@@ -14,6 +15,11 @@ export class RabbitmqController extends EventController implements EventControll
   private maxReconnectAttempts = 10;
   private reconnectDelay = 5000; // 5 seconds
   private isReconnecting = false;
+
+  private normalizeEventKey(eventKey: string) {
+    const mapped = (Events as Record<string, string>)[eventKey];
+    return (mapped || eventKey.replace(/_/g, '.')).toLowerCase();
+  }
 
   constructor(prismaRepository: PrismaRepository, waMonitor: WAMonitoringService) {
     super(prismaRepository, waMonitor, configService.get<Rabbitmq>('RABBITMQ')?.ENABLED, 'rabbitmq');
@@ -374,10 +380,8 @@ export class RabbitmqController extends EventController implements EventControll
       if (events[event] === false) continue;
 
       try {
-        const queueName =
-          prefixKey !== ''
-            ? `${prefixKey}.${event.replace(/_/g, '.').toLowerCase()}`
-            : `${event.replace(/_/g, '.').toLowerCase()}`;
+        const normalizedEvent = this.normalizeEventKey(event);
+        const queueName = prefixKey !== '' ? `${prefixKey}.${normalizedEvent}` : normalizedEvent;
         const exchangeName = rabbitmqExchangeName;
 
         await this.amqpChannel.assertExchange(exchangeName, 'topic', {
@@ -393,7 +397,7 @@ export class RabbitmqController extends EventController implements EventControll
           },
         });
 
-        await this.amqpChannel.bindQueue(queueName, exchangeName, event);
+        await this.amqpChannel.bindQueue(queueName, exchangeName, normalizedEvent);
 
         this.logger.info(`Global queue initialized: ${queueName}`);
       } catch (error) {

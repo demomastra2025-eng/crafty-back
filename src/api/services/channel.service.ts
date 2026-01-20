@@ -1,15 +1,11 @@
 import { InstanceDto } from '@api/dto/instance.dto';
 import { ProxyDto } from '@api/dto/proxy.dto';
 import { SettingsDto } from '@api/dto/settings.dto';
-import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
-import { ChatwootService } from '@api/integrations/chatbot/chatwoot/services/chatwoot.service';
-import { DifyService } from '@api/integrations/chatbot/dify/services/dify.service';
 import { OpenaiService } from '@api/integrations/chatbot/openai/services/openai.service';
-import { TypebotService } from '@api/integrations/chatbot/typebot/services/typebot.service';
 import { PrismaRepository, Query } from '@api/repository/repository.service';
-import { eventManager, waMonitor } from '@api/server.module';
+import { eventManager } from '@api/server.module';
 import { Events, wa } from '@api/types/wa.types';
-import { Auth, Chatwoot, ConfigService, HttpServer, Proxy } from '@config/env.config';
+import { Auth, ConfigService, HttpServer, Proxy } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { NotFoundException } from '@exceptions';
 import { Contact, Message, Prisma } from '@prisma/client';
@@ -19,37 +15,22 @@ import { isArray } from 'class-validator';
 import EventEmitter2 from 'eventemitter2';
 import { v4 } from 'uuid';
 
-import { CacheService } from './cache.service';
-
 export class ChannelStartupService {
   constructor(
     public readonly configService: ConfigService,
     public readonly eventEmitter: EventEmitter2,
     public readonly prismaRepository: PrismaRepository,
-    public readonly chatwootCache: CacheService,
   ) {}
 
   public readonly logger = new Logger('ChannelStartupService');
 
   public client: WASocket;
   public readonly instance: wa.Instance = {};
-  public readonly localChatwoot: wa.LocalChatwoot = {};
   public readonly localProxy: wa.LocalProxy = {};
   public readonly localSettings: wa.LocalSettings = {};
   public readonly localWebhook: wa.LocalWebHook = {};
 
-  public chatwootService = new ChatwootService(
-    waMonitor,
-    this.configService,
-    this.prismaRepository,
-    this.chatwootCache,
-  );
-
-  public openaiService = new OpenaiService(waMonitor, this.prismaRepository, this.configService);
-
-  public typebotService = new TypebotService(waMonitor, this.configService, this.prismaRepository, this.openaiService);
-
-  public difyService = new DifyService(waMonitor, this.prismaRepository, this.configService, this.openaiService);
+  public openaiService = new OpenaiService(this.prismaRepository, this.configService);
 
   public setInstance(instance: InstanceDto) {
     this.logger.setInstance(instance.instanceName);
@@ -61,17 +42,6 @@ export class ChannelStartupService {
     this.instance.token = instance.token;
     this.instance.businessId = instance.businessId;
     this.instance.ownerJid = instance.ownerJid;
-
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-      this.chatwootService.eventWhatsapp(
-        Events.STATUS_INSTANCE,
-        { instanceName: this.instance.name },
-        {
-          instance: this.instance.name,
-          status: 'created',
-        },
-      );
-    }
   }
 
   public set instanceName(name: string) {
@@ -153,10 +123,15 @@ export class ChannelStartupService {
     this.localSettings.readMessages = data?.readMessages;
     this.localSettings.readStatus = data?.readStatus;
     this.localSettings.syncFullHistory = data?.syncFullHistory;
+    this.localSettings.mediaRecognition = data?.mediaRecognition;
     this.localSettings.wavoipToken = data?.wavoipToken;
   }
 
   public async setSettings(data: SettingsDto) {
+    if (data.mediaRecognition) {
+      await this.openaiService.ensureProviderCredentials(this.instanceId, 'openai');
+    }
+
     await this.prismaRepository.setting.upsert({
       where: {
         instanceId: this.instanceId,
@@ -169,6 +144,7 @@ export class ChannelStartupService {
         readMessages: data.readMessages,
         readStatus: data.readStatus,
         syncFullHistory: data.syncFullHistory,
+        mediaRecognition: data.mediaRecognition,
         wavoipToken: data.wavoipToken,
       },
       create: {
@@ -179,6 +155,7 @@ export class ChannelStartupService {
         readMessages: data.readMessages,
         readStatus: data.readStatus,
         syncFullHistory: data.syncFullHistory,
+        mediaRecognition: data.mediaRecognition,
         wavoipToken: data.wavoipToken,
         instanceId: this.instanceId,
       },
@@ -191,6 +168,7 @@ export class ChannelStartupService {
     this.localSettings.readMessages = data?.readMessages;
     this.localSettings.readStatus = data?.readStatus;
     this.localSettings.syncFullHistory = data?.syncFullHistory;
+    this.localSettings.mediaRecognition = data?.mediaRecognition;
     this.localSettings.wavoipToken = data?.wavoipToken;
 
     if (this.localSettings.wavoipToken && this.localSettings.wavoipToken.length > 0) {
@@ -218,148 +196,9 @@ export class ChannelStartupService {
       readMessages: data.readMessages,
       readStatus: data.readStatus,
       syncFullHistory: data.syncFullHistory,
+      mediaRecognition: data.mediaRecognition,
       wavoipToken: data.wavoipToken,
     };
-  }
-
-  public async loadChatwoot() {
-    if (!this.configService.get<Chatwoot>('CHATWOOT').ENABLED) {
-      return;
-    }
-
-    const data = await this.prismaRepository.chatwoot.findUnique({
-      where: {
-        instanceId: this.instanceId,
-      },
-    });
-
-    this.localChatwoot.enabled = data?.enabled;
-    this.localChatwoot.accountId = data?.accountId;
-    this.localChatwoot.token = data?.token;
-    this.localChatwoot.url = data?.url;
-    this.localChatwoot.nameInbox = data?.nameInbox;
-    this.localChatwoot.signMsg = data?.signMsg;
-    this.localChatwoot.signDelimiter = data?.signDelimiter;
-    this.localChatwoot.number = data?.number;
-    this.localChatwoot.reopenConversation = data?.reopenConversation;
-    this.localChatwoot.conversationPending = data?.conversationPending;
-    this.localChatwoot.mergeBrazilContacts = data?.mergeBrazilContacts;
-    this.localChatwoot.importContacts = data?.importContacts;
-    this.localChatwoot.importMessages = data?.importMessages;
-    this.localChatwoot.daysLimitImportMessages = data?.daysLimitImportMessages;
-  }
-
-  public async setChatwoot(data: ChatwootDto) {
-    if (!this.configService.get<Chatwoot>('CHATWOOT').ENABLED) {
-      return;
-    }
-
-    const chatwoot = await this.prismaRepository.chatwoot.findUnique({
-      where: {
-        instanceId: this.instanceId,
-      },
-    });
-
-    if (chatwoot) {
-      await this.prismaRepository.chatwoot.update({
-        where: {
-          instanceId: this.instanceId,
-        },
-        data: {
-          enabled: data?.enabled,
-          accountId: data.accountId,
-          token: data.token,
-          url: data.url,
-          nameInbox: data.nameInbox,
-          signMsg: data.signMsg,
-          signDelimiter: data.signMsg ? data.signDelimiter : null,
-          number: data.number,
-          reopenConversation: data.reopenConversation,
-          conversationPending: data.conversationPending,
-          mergeBrazilContacts: data.mergeBrazilContacts,
-          importContacts: data.importContacts,
-          importMessages: data.importMessages,
-          daysLimitImportMessages: data.daysLimitImportMessages,
-          organization: data.organization,
-          logo: data.logo,
-          ignoreJids: data.ignoreJids,
-        },
-      });
-
-      Object.assign(this.localChatwoot, { ...data, signDelimiter: data.signMsg ? data.signDelimiter : null });
-
-      this.clearCacheChatwoot();
-      return;
-    }
-
-    await this.prismaRepository.chatwoot.create({
-      data: {
-        enabled: data?.enabled,
-        accountId: data.accountId,
-        token: data.token,
-        url: data.url,
-        nameInbox: data.nameInbox,
-        signMsg: data.signMsg,
-        number: data.number,
-        reopenConversation: data.reopenConversation,
-        conversationPending: data.conversationPending,
-        mergeBrazilContacts: data.mergeBrazilContacts,
-        importContacts: data.importContacts,
-        importMessages: data.importMessages,
-        daysLimitImportMessages: data.daysLimitImportMessages,
-        organization: data.organization,
-        logo: data.logo,
-        ignoreJids: data.ignoreJids,
-        instanceId: this.instanceId,
-      },
-    });
-
-    Object.assign(this.localChatwoot, { ...data, signDelimiter: data.signMsg ? data.signDelimiter : null });
-
-    this.clearCacheChatwoot();
-  }
-
-  public async findChatwoot(): Promise<ChatwootDto | null> {
-    if (!this.configService.get<Chatwoot>('CHATWOOT').ENABLED) {
-      return null;
-    }
-
-    const data = await this.prismaRepository.chatwoot.findUnique({
-      where: {
-        instanceId: this.instanceId,
-      },
-    });
-
-    if (!data) {
-      return null;
-    }
-
-    const ignoreJidsArray = Array.isArray(data.ignoreJids) ? data.ignoreJids.map((event) => String(event)) : [];
-
-    return {
-      enabled: data?.enabled,
-      accountId: data.accountId,
-      token: data.token,
-      url: data.url,
-      nameInbox: data.nameInbox,
-      signMsg: data.signMsg,
-      signDelimiter: data.signDelimiter || null,
-      reopenConversation: data.reopenConversation,
-      conversationPending: data.conversationPending,
-      mergeBrazilContacts: data.mergeBrazilContacts,
-      importContacts: data.importContacts,
-      importMessages: data.importMessages,
-      daysLimitImportMessages: data.daysLimitImportMessages,
-      organization: data.organization,
-      logo: data.logo,
-      ignoreJids: ignoreJidsArray,
-    };
-  }
-
-  public clearCacheChatwoot() {
-    if (this.localChatwoot?.enabled) {
-      this.chatwootService.getCache()?.deleteAll(this.instanceName);
-    }
   }
 
   public async loadProxy() {
@@ -519,10 +358,11 @@ export class ChannelStartupService {
       where,
     };
 
-    if (query.offset) contactFindManyArgs.take = query.offset;
+    const pageSize = query?.offset ?? (query?.page ? 50 : undefined);
+    if (pageSize) contactFindManyArgs.take = pageSize;
     if (query.page) {
       const validPage = Math.max(query.page as number, 1);
-      contactFindManyArgs.skip = query.offset * (validPage - 1);
+      contactFindManyArgs.skip = pageSize * (validPage - 1);
     }
 
     const contacts = await this.prismaRepository.contact.findMany(contactFindManyArgs);
@@ -604,6 +444,7 @@ export class ChannelStartupService {
       remoteJid?: string;
       participants?: string;
     };
+    const hasFromMeFilter = typeof keyFilters?.fromMe === 'boolean';
 
     const timestampFilter = {};
     if (query?.where?.messageTimestamp) {
@@ -624,7 +465,7 @@ export class ChannelStartupService {
         ...timestampFilter,
         AND: [
           keyFilters?.id ? { key: { path: ['id'], equals: keyFilters?.id } } : {},
-          keyFilters?.fromMe ? { key: { path: ['fromMe'], equals: keyFilters?.fromMe } } : {},
+          hasFromMeFilter ? { key: { path: ['fromMe'], equals: keyFilters?.fromMe } } : {},
           keyFilters?.remoteJid ? { key: { path: ['remoteJid'], equals: keyFilters?.remoteJid } } : {},
           keyFilters?.participants ? { key: { path: ['participants'], equals: keyFilters?.participants } } : {},
         ],
@@ -648,7 +489,7 @@ export class ChannelStartupService {
         ...timestampFilter,
         AND: [
           keyFilters?.id ? { key: { path: ['id'], equals: keyFilters?.id } } : {},
-          keyFilters?.fromMe ? { key: { path: ['fromMe'], equals: keyFilters?.fromMe } } : {},
+          hasFromMeFilter ? { key: { path: ['fromMe'], equals: keyFilters?.fromMe } } : {},
           keyFilters?.remoteJid ? { key: { path: ['remoteJid'], equals: keyFilters?.remoteJid } } : {},
           keyFilters?.participants ? { key: { path: ['participants'], equals: keyFilters?.participants } } : {},
         ],
@@ -667,6 +508,7 @@ export class ChannelStartupService {
         messageTimestamp: true,
         instanceId: true,
         source: true,
+        author: true,
         contextInfo: true,
         MessageUpdate: {
           select: {
@@ -755,7 +597,6 @@ export class ChannelStartupService {
             to_timestamp("Message"."messageTimestamp"::double precision), 
             "Contact"."updatedAt"
           ) as "updatedAt",
-          "Chat"."name" as "pushName",
           "Chat"."createdAt" as "windowStart",
           "Chat"."createdAt" + INTERVAL '24 hours' as "windowExpires",
           "Chat"."unreadMessages" as "unreadMessages",

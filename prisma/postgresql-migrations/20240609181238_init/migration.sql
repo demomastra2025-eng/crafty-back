@@ -5,8 +5,6 @@ CREATE TYPE "InstanceConnectionStatus" AS ENUM ('open', 'close', 'connecting');
 CREATE TYPE "DeviceMessage" AS ENUM ('ios', 'android', 'web', 'unknown', 'desktop');
 
 -- CreateEnum
-CREATE TYPE "TypebotSessionStatus" AS ENUM ('open', 'closed', 'paused');
-
 -- CreateEnum
 CREATE TYPE "TriggerType" AS ENUM ('all', 'keyword');
 
@@ -76,13 +74,7 @@ CREATE TABLE "Message" (
     "contextInfo" JSONB,
     "source" "DeviceMessage" NOT NULL,
     "messageTimestamp" INTEGER NOT NULL,
-    "chatwootMessageId" INTEGER,
-    "chatwootInboxId" INTEGER,
-    "chatwootConversationId" INTEGER,
-    "chatwootContactInboxSourceId" VARCHAR(100),
-    "chatwootIsRead" BOOLEAN,
     "instanceId" TEXT NOT NULL,
-    "typebotSessionId" TEXT,
 
     CONSTRAINT "Message_pkey" PRIMARY KEY ("id")
 );
@@ -118,28 +110,6 @@ CREATE TABLE "Webhook" (
 );
 
 -- CreateTable
-CREATE TABLE "Chatwoot" (
-    "id" TEXT NOT NULL,
-    "enabled" BOOLEAN DEFAULT true,
-    "accountId" VARCHAR(100),
-    "token" VARCHAR(100),
-    "url" VARCHAR(500),
-    "nameInbox" VARCHAR(100),
-    "signMsg" BOOLEAN DEFAULT false,
-    "signDelimiter" VARCHAR(100),
-    "number" VARCHAR(100),
-    "reopenConversation" BOOLEAN DEFAULT false,
-    "conversationPending" BOOLEAN DEFAULT false,
-    "mergeBrazilContacts" BOOLEAN DEFAULT false,
-    "importContacts" BOOLEAN DEFAULT false,
-    "importMessages" BOOLEAN DEFAULT false,
-    "daysLimitImportMessages" INTEGER,
-    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL,
-    "instanceId" TEXT NOT NULL,
-
-    CONSTRAINT "Chatwoot_pkey" PRIMARY KEY ("id")
-);
 
 -- CreateTable
 CREATE TABLE "Label" (
@@ -224,62 +194,8 @@ CREATE TABLE "Websocket" (
     CONSTRAINT "Websocket_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "Typebot" (
-    "id" TEXT NOT NULL,
-    "enabled" BOOLEAN NOT NULL DEFAULT true,
-    "url" VARCHAR(500) NOT NULL,
-    "typebot" VARCHAR(100) NOT NULL,
-    "expire" INTEGER DEFAULT 0,
-    "keywordFinish" VARCHAR(100),
-    "delayMessage" INTEGER,
-    "unknownMessage" VARCHAR(100),
-    "listeningFromMe" BOOLEAN DEFAULT false,
-    "stopBotFromMe" BOOLEAN DEFAULT false,
-    "keepOpen" BOOLEAN DEFAULT false,
-    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP,
-    "triggerType" "TriggerType",
-    "triggerOperator" "TriggerOperator",
-    "triggerValue" TEXT,
-    "instanceId" TEXT NOT NULL,
 
-    CONSTRAINT "Typebot_pkey" PRIMARY KEY ("id")
-);
 
--- CreateTable
-CREATE TABLE "TypebotSession" (
-    "id" TEXT NOT NULL,
-    "remoteJid" VARCHAR(100) NOT NULL,
-    "pushName" VARCHAR(100),
-    "sessionId" VARCHAR(100) NOT NULL,
-    "status" VARCHAR(100) NOT NULL,
-    "prefilledVariables" JSONB,
-    "awaitUser" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL,
-    "typebotId" TEXT NOT NULL,
-    "instanceId" TEXT NOT NULL,
-
-    CONSTRAINT "TypebotSession_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "TypebotSetting" (
-    "id" TEXT NOT NULL,
-    "expire" INTEGER DEFAULT 0,
-    "keywordFinish" VARCHAR(100),
-    "delayMessage" INTEGER,
-    "unknownMessage" VARCHAR(100),
-    "listeningFromMe" BOOLEAN DEFAULT false,
-    "stopBotFromMe" BOOLEAN DEFAULT false,
-    "keepOpen" BOOLEAN DEFAULT false,
-    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL,
-    "instanceId" TEXT NOT NULL,
-
-    CONSTRAINT "TypebotSetting_pkey" PRIMARY KEY ("id")
-);
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Instance_name_key" ON "Instance"("name");
@@ -294,7 +210,6 @@ CREATE UNIQUE INDEX "Session_sessionId_key" ON "Session"("sessionId");
 CREATE UNIQUE INDEX "Webhook_instanceId_key" ON "Webhook"("instanceId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Chatwoot_instanceId_key" ON "Chatwoot"("instanceId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Label_labelId_key" ON "Label"("labelId");
@@ -315,7 +230,6 @@ CREATE UNIQUE INDEX "Sqs_instanceId_key" ON "Sqs"("instanceId");
 CREATE UNIQUE INDEX "Websocket_instanceId_key" ON "Websocket"("instanceId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "TypebotSetting_instanceId_key" ON "TypebotSetting"("instanceId");
 
 -- AddForeignKey
 ALTER TABLE "Session" ADD CONSTRAINT "Session_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -330,7 +244,6 @@ ALTER TABLE "Contact" ADD CONSTRAINT "Contact_instanceId_fkey" FOREIGN KEY ("ins
 ALTER TABLE "Message" ADD CONSTRAINT "Message_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Message" ADD CONSTRAINT "Message_typebotSessionId_fkey" FOREIGN KEY ("typebotSessionId") REFERENCES "TypebotSession"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MessageUpdate" ADD CONSTRAINT "MessageUpdate_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "Message"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -342,7 +255,6 @@ ALTER TABLE "MessageUpdate" ADD CONSTRAINT "MessageUpdate_instanceId_fkey" FOREI
 ALTER TABLE "Webhook" ADD CONSTRAINT "Webhook_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Chatwoot" ADD CONSTRAINT "Chatwoot_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Label" ADD CONSTRAINT "Label_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -363,13 +275,9 @@ ALTER TABLE "Sqs" ADD CONSTRAINT "Sqs_instanceId_fkey" FOREIGN KEY ("instanceId"
 ALTER TABLE "Websocket" ADD CONSTRAINT "Websocket_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Typebot" ADD CONSTRAINT "Typebot_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TypebotSession" ADD CONSTRAINT "TypebotSession_typebotId_fkey" FOREIGN KEY ("typebotId") REFERENCES "Typebot"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TypebotSession" ADD CONSTRAINT "TypebotSession_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TypebotSetting" ADD CONSTRAINT "TypebotSetting_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;

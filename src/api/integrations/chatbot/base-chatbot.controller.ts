@@ -3,7 +3,7 @@ import { InstanceDto } from '@api/dto/instance.dto';
 import { setLastInboundKeyId } from '@api/integrations/chatbot/session-cache';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
-import { Events } from '@api/types/wa.types';
+import { configService } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { BadRequestException } from '@exceptions';
 import { TriggerOperator, TriggerType } from '@prisma/client';
@@ -11,6 +11,7 @@ import { getConversationMessage } from '@utils/getConversationMessage';
 
 import { BaseChatbotDto } from './base-chatbot.dto';
 import { ChatbotController, ChatbotControllerInterface, EmitData } from './chatbot.controller';
+import { SessionMessagesCache } from './session-messages-cache';
 
 // Common settings interface for all chatbot integrations
 export interface ChatbotSettings {
@@ -60,6 +61,7 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
   settingsRepository: any;
   sessionRepository: any;
   userMessageDebounce: { [key: string]: { message: string; timeoutId: NodeJS.Timeout } } = {};
+  private readonly sessionMessagesCache = new SessionMessagesCache(configService);
 
   // Name of the integration, to be set by the derived class
   protected abstract readonly integrationName: string;
@@ -85,6 +87,11 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
     this.sessionRepository = this.prismaRepository.integrationSession;
   }
 
+  private async clearSessionMessagesCache(sessionIds: string[]) {
+    if (!sessionIds.length) return;
+    await Promise.all(sessionIds.map((sessionId) => this.sessionMessagesCache.delete(`session:${sessionId}:messages`)));
+  }
+
   // Base create bot implementation
   public async createBot(instance: InstanceDto, data: BotData) {
     if (!this.integrationEnabled) throw new BadRequestException(`${this.integrationName} is disabled`);
@@ -98,18 +105,21 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
       .then((instance) => instance.id);
 
     // Set default settings if not provided
+    const isMissing = (value: unknown) => value === undefined || value === null;
     if (
-      !data.expire ||
-      !data.keywordFinish ||
-      !data.delayMessage ||
-      !data.unknownMessage ||
-      !data.listeningFromMe ||
-      !data.stopBotFromMe ||
-      !data.keepOpen ||
-      !data.debounceTime ||
-      !data.ignoreJids ||
-      !data.splitMessages ||
-      !data.timePerChar
+      [
+        data.expire,
+        data.keywordFinish,
+        data.delayMessage,
+        data.unknownMessage,
+        data.listeningFromMe,
+        data.stopBotFromMe,
+        data.keepOpen,
+        data.debounceTime,
+        data.ignoreJids,
+        data.splitMessages,
+        data.timePerChar,
+      ].some(isMissing)
     ) {
       const defaultSettingCheck = await this.settingsRepository.findFirst({
         where: {
@@ -283,9 +293,18 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
     if (!this.integrationEnabled) throw new BadRequestException(`${this.integrationName} is disabled`);
 
     try {
-      const bot = await this.botRepository.findUnique({
+      const instanceId = await this.prismaRepository.instance
+        .findFirst({
+          where: {
+            name: instance.instanceName,
+          },
+        })
+        .then((instance) => instance.id);
+
+      const bot = await this.botRepository.findFirst({
         where: {
           id: botId,
+          instanceId,
         },
       });
 
@@ -377,7 +396,7 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
   // Abstract method to get the field name for the fallback ID
   protected abstract getFallbackFieldName(): string;
 
-  // Abstract method to get the integration type (dify, n8n, evoai, etc.)
+  // Abstract method to get the integration type (chatbot identifier)
   protected abstract getIntegrationType(): string;
 
   // Common implementation for fetchSettings
@@ -456,22 +475,14 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
 
       const remoteJid = data.remoteJid;
       const status = data.status;
-      const session = await this.getSession(remoteJid, instance);
-
-      if (this.integrationName === 'Typebot') {
-        const typebotData = {
-          remoteJid: remoteJid,
-          status: status,
-          session,
-        };
-        this.waMonitor.waInstances[instance.instanceName].sendDataWebhook(Events.TYPEBOT_CHANGE_STATUS, typebotData);
-      }
-
+      const integrationType = this.getIntegrationType();
       if (status === 'delete') {
         await this.sessionRepository.deleteMany({
           where: {
+            instanceId,
             remoteJid: remoteJid,
             botId: { not: null },
+            type: integrationType,
           },
         });
 
@@ -479,11 +490,22 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
       }
 
       if (status === 'closed') {
+        const sessions = await this.sessionRepository.findMany({
+          where: {
+            instanceId,
+            remoteJid: remoteJid,
+            botId: { not: null },
+            type: integrationType,
+          },
+          select: { id: true },
+        });
         if (defaultSettingCheck?.keepOpen) {
           await this.sessionRepository.updateMany({
             where: {
+              instanceId,
               remoteJid: remoteJid,
               botId: { not: null },
+              type: integrationType,
             },
             data: {
               status: 'closed',
@@ -492,24 +514,40 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
         } else {
           await this.sessionRepository.deleteMany({
             where: {
+              instanceId,
               remoteJid: remoteJid,
               botId: { not: null },
+              type: integrationType,
             },
           });
         }
+        await this.clearSessionMessagesCache(sessions.map((item) => item.id));
 
         return { bot: { ...instance, bot: { remoteJid: remoteJid, status: status } } };
       } else {
+        const sessions = await this.sessionRepository.findMany({
+          where: {
+            instanceId: instanceId,
+            remoteJid: remoteJid,
+            botId: { not: null },
+            type: integrationType,
+          },
+          select: { id: true },
+        });
         const session = await this.sessionRepository.updateMany({
           where: {
             instanceId: instanceId,
             remoteJid: remoteJid,
             botId: { not: null },
+            type: integrationType,
           },
           data: {
             status: status,
           },
         });
+        if (status === 'paused') {
+          await this.clearSessionMessagesCache(sessions.map((item) => item.id));
+        }
 
         const botData = {
           remoteJid: remoteJid,
@@ -548,7 +586,7 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
         throw new Error(`${this.integrationName} not found`);
       }
 
-      // Get the integration type (dify, n8n, evoai, etc.)
+      // Get the integration type (chatbot identifier)
       const integrationType = this.getIntegrationType();
 
       return await this.sessionRepository.findMany({
@@ -804,11 +842,26 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
         },
       });
 
-      if (this.checkIgnoreJids(settings?.ignoreJids, remoteJid)) return;
+      const defaultSettings: ChatbotSettings = {
+        expire: 300,
+        keywordFinish: 'bye',
+        delayMessage: 1000,
+        unknownMessage: 'Sorry, I dont understand',
+        listeningFromMe: true,
+        stopBotFromMe: true,
+        keepOpen: false,
+        debounceTime: 1,
+        ignoreJids: [],
+        splitMessages: false,
+        timePerChar: 0,
+      };
+      const effectiveSettings = settings ?? defaultSettings;
 
-      const session = await this.getSession(remoteJid, instance);
+      if (this.checkIgnoreJids(effectiveSettings.ignoreJids, remoteJid)) return;
 
-      const content = getConversationMessage(msg);
+      const session = await this.getSession(remoteJid, instance, this.getIntegrationType());
+
+      const content = getConversationMessage(msg) ?? '';
 
       // Get integration type
       // const integrationType = this.getIntegrationType();
@@ -858,17 +911,18 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
       let splitMessages = findBot.splitMessages;
       let timePerChar = findBot.timePerChar;
 
-      if (expire === undefined || expire === null) expire = settings.expire;
-      if (keywordFinish === undefined || keywordFinish === null) keywordFinish = settings.keywordFinish;
-      if (delayMessage === undefined || delayMessage === null) delayMessage = settings.delayMessage;
-      if (unknownMessage === undefined || unknownMessage === null) unknownMessage = settings.unknownMessage;
-      if (listeningFromMe === undefined || listeningFromMe === null) listeningFromMe = settings.listeningFromMe;
-      if (stopBotFromMe === undefined || stopBotFromMe === null) stopBotFromMe = settings.stopBotFromMe;
-      if (keepOpen === undefined || keepOpen === null) keepOpen = settings.keepOpen;
-      if (debounceTime === undefined || debounceTime === null) debounceTime = settings.debounceTime;
-      if (ignoreJids === undefined || ignoreJids === null) ignoreJids = settings.ignoreJids;
-      if (splitMessages === undefined || splitMessages === null) splitMessages = settings?.splitMessages ?? false;
-      if (timePerChar === undefined || timePerChar === null) timePerChar = settings?.timePerChar ?? 0;
+      if (expire === undefined || expire === null) expire = effectiveSettings.expire;
+      if (keywordFinish === undefined || keywordFinish === null) keywordFinish = effectiveSettings.keywordFinish;
+      if (delayMessage === undefined || delayMessage === null) delayMessage = effectiveSettings.delayMessage;
+      if (unknownMessage === undefined || unknownMessage === null) unknownMessage = effectiveSettings.unknownMessage;
+      if (listeningFromMe === undefined || listeningFromMe === null)
+        listeningFromMe = effectiveSettings.listeningFromMe;
+      if (stopBotFromMe === undefined || stopBotFromMe === null) stopBotFromMe = effectiveSettings.stopBotFromMe;
+      if (keepOpen === undefined || keepOpen === null) keepOpen = effectiveSettings.keepOpen;
+      if (debounceTime === undefined || debounceTime === null) debounceTime = effectiveSettings.debounceTime;
+      if (ignoreJids === undefined || ignoreJids === null) ignoreJids = effectiveSettings.ignoreJids;
+      if (splitMessages === undefined || splitMessages === null) splitMessages = effectiveSettings.splitMessages;
+      if (timePerChar === undefined || timePerChar === null) timePerChar = effectiveSettings.timePerChar;
 
       const key = msg.key as {
         id: string;
@@ -905,15 +959,7 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
             status: 'paused',
           },
         });
-
-        if (this.integrationName === 'Typebot') {
-          const typebotData = {
-            remoteJid: remoteJid,
-            status: 'paused',
-            session,
-          };
-          this.waMonitor.waInstances[instance.instanceName].sendDataWebhook(Events.TYPEBOT_CHANGE_STATUS, typebotData);
-        }
+        await this.clearSessionMessagesCache([session.id]);
 
         return;
       }

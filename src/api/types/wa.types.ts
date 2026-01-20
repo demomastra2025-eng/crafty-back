@@ -28,8 +28,6 @@ export enum Events {
   GROUPS_UPDATE = 'groups.update',
   GROUP_PARTICIPANTS_UPDATE = 'group-participants.update',
   CALL = 'call',
-  TYPEBOT_START = 'typebot.start',
-  TYPEBOT_CHANGE_STATUS = 'typebot.change-status',
   LABELS_EDIT = 'labels.edit',
   LABELS_ASSOCIATION = 'labels.association',
   CREDS_UPDATE = 'creds.update',
@@ -63,23 +61,6 @@ export declare namespace wa {
     businessId?: string;
   };
 
-  export type LocalChatwoot = {
-    enabled?: boolean;
-    accountId?: string;
-    token?: string;
-    url?: string;
-    nameInbox?: string;
-    signMsg?: boolean;
-    signDelimiter?: string;
-    number?: string;
-    reopenConversation?: boolean;
-    conversationPending?: boolean;
-    mergeBrazilContacts?: boolean;
-    importContacts?: boolean;
-    importMessages?: boolean;
-    daysLimitImportMessages?: number;
-  };
-
   export type LocalSettings = {
     rejectCall?: boolean;
     msgCall?: string;
@@ -88,6 +69,7 @@ export declare namespace wa {
     readMessages?: boolean;
     readStatus?: boolean;
     syncFullHistory?: boolean;
+    mediaRecognition?: boolean;
     wavoipToken?: string;
   };
 

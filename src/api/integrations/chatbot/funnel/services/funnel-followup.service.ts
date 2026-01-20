@@ -1,10 +1,10 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { Logger } from '@config/logger.config';
-import { IntegrationSession, N8n, N8nSetting } from '@prisma/client';
+import { Agno, AgnoSetting, IntegrationSession } from '@prisma/client';
 import cron, { ScheduledTask } from 'node-cron';
 
-import { N8nService } from '../../n8n/services/n8n.service';
+import { AgnoService } from '../../agno/services/agno.service';
 
 type FunnelStep = {
   stage: number;
@@ -25,7 +25,7 @@ export class FunnelFollowUpService {
   constructor(
     private readonly prismaRepository: PrismaRepository,
     private readonly waMonitor: WAMonitoringService,
-    private readonly n8nService: N8nService,
+    private readonly agnoService: AgnoService,
   ) {}
 
   public startScheduler() {
@@ -91,7 +91,7 @@ export class FunnelFollowUpService {
       awaitUser: true,
       followUpEnable: true,
       funnelId: { not: null },
-      type: 'n8n',
+      type: { in: ['agno'] },
     };
 
     if (instanceRecord) {
@@ -109,6 +109,7 @@ export class FunnelFollowUpService {
         instanceId: true,
         funnelId: true,
         funnelEnable: true,
+        type: true,
       },
     });
 
@@ -155,47 +156,52 @@ export class FunnelFollowUpService {
 
       if (!session.botId) continue;
 
-      const [bot, settings, instanceInfo] = await Promise.all([
-        this.prismaRepository.n8n.findFirst({ where: { id: session.botId } }),
-        this.prismaRepository.n8nSetting.findFirst({ where: { instanceId: session.instanceId } }),
-        this.prismaRepository.instance.findFirst({ where: { id: session.instanceId } }),
-      ]);
+      const instanceInfo = await this.prismaRepository.instance.findFirst({ where: { id: session.instanceId } });
+      if (!instanceInfo) continue;
 
-      if (!bot || !settings || !instanceInfo) continue;
+      if (session.type === 'agno') {
+        const [bot, settings] = await Promise.all([
+          this.prismaRepository.agno.findFirst({ where: { id: session.botId } }),
+          this.prismaRepository.agnoSetting.findFirst({ where: { instanceId: session.instanceId } }),
+        ]);
+        if (!bot || !settings) continue;
 
-      const waInstance = this.waMonitor.waInstances[instanceInfo.name];
-      if (!waInstance) continue;
+        const waInstance = this.waMonitor.waInstances[instanceInfo.name];
+        if (!waInstance) continue;
 
-      const sent = await this.sendFollowUpToN8n(
-        waInstance,
-        session as IntegrationSession,
-        settings as N8nSetting,
-        bot as N8n,
-        funnel,
-        steps,
-        stepIndex,
-      );
+        const sent = await this.sendFollowUpToAgno(
+          waInstance,
+          session as IntegrationSession,
+          settings as AgnoSetting,
+          bot as Agno,
+          funnel,
+          steps,
+          stepIndex,
+        );
 
-      if (!sent) continue;
+        if (!sent) continue;
 
-      await this.prismaRepository.integrationSession.update({
-        where: { id: session.id },
-        data: { followUpStage: stepIndex + 1 },
-      });
+        await this.prismaRepository.integrationSession.update({
+          where: { id: session.id },
+          data: { followUpStage: stepIndex + 1 },
+        });
+
+        continue;
+      }
     }
   }
 
-  private async sendFollowUpToN8n(
+  private async sendFollowUpToAgno(
     instance: any,
     session: IntegrationSession,
-    settings: N8nSetting,
-    bot: N8n,
+    settings: AgnoSetting,
+    bot: Agno,
     funnel: any,
     steps: FunnelStep[],
     stepIndex: number,
   ): Promise<boolean> {
     try {
-      return await this.n8nService.sendFollowUpStep(instance, session, settings, bot, funnel, steps, stepIndex);
+      return await this.agnoService.sendFollowUpStep(instance, session, settings, bot, funnel, steps, stepIndex);
     } catch (error) {
       this.logger.error(['Failed to send funnel follow-up', error?.message || error]);
       return false;

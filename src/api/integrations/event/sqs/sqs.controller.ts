@@ -12,6 +12,10 @@ export class SqsController extends EventController implements EventControllerInt
   private sqs: SQS;
   private readonly logger = new Logger('SqsController');
 
+  private normalizeEventName(event: string) {
+    return event.replace(/[.-]/g, '_').toLowerCase();
+  }
+
   constructor(prismaRepository: PrismaRepository, waMonitor: WAMonitoringService) {
     super(prismaRepository, waMonitor, configService.get<Sqs>('SQS')?.ENABLED, 'sqs');
   }
@@ -124,7 +128,7 @@ export class SqsController extends EventController implements EventControllerInt
         const eventFormatted =
           sqsConfig.GLOBAL_ENABLED && sqsConfig.GLOBAL_FORCE_SINGLE_QUEUE
             ? 'singlequeue'
-            : `${event.replace('.', '_').toLowerCase()}`;
+            : this.normalizeEventName(event);
         const queueName = `${prefixName}_${eventFormatted}.fifo`;
         const sqsUrl = `https://sqs.${sqsConfig.REGION}.amazonaws.com/${sqsConfig.ACCOUNT_ID}/${queueName}`;
 

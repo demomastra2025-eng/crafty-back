@@ -18,7 +18,6 @@ import {
 import { onUnexpectedError } from '@config/error.config';
 import { Logger } from '@config/logger.config';
 import { ROOT_DIR } from '@config/path.config';
-import * as Sentry from '@sentry/node';
 import { ServerUP } from '@utils/server-up';
 import axios from 'axios';
 import compression from 'compression';
@@ -48,6 +47,9 @@ async function bootstrap() {
     cors({
       origin(requestOrigin, callback) {
         const { ORIGIN } = configService.get<Cors>('CORS');
+        if (!requestOrigin) {
+          return callback(null, true);
+        }
         if (ORIGIN.includes('*')) {
           return callback(null, true);
         }
@@ -104,7 +106,13 @@ async function bootstrap() {
           const baseURL = webhook.EVENTS.ERRORS_WEBHOOK;
           const httpService = axios.create({ baseURL });
 
-          httpService.post('', errorData);
+          void httpService.post('', errorData).catch((postError) => {
+            logger.error({
+              local: 'errors-webhook',
+              message: 'Failed to send errors webhook',
+              error: postError?.message || postError,
+            });
+          });
         }
 
         return res.status(err['status'] || 500).json({
@@ -154,7 +162,13 @@ async function bootstrap() {
 
     // Add this after all routes,
     // but before any and other error-handling middlewares are defined
-    Sentry.setupExpressErrorHandler(app);
+    void import('@sentry/node')
+      .then((Sentry) => {
+        Sentry.setupExpressErrorHandler(app);
+      })
+      .catch((error) => {
+        logger.warn(`Sentry disabled: failed to load @sentry/node (${error})`);
+      });
   }
 
   server.listen(httpServer.PORT, () => logger.log(httpServer.TYPE.toUpperCase() + ' - ON: ' + httpServer.PORT));

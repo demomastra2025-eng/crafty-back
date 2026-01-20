@@ -8,6 +8,7 @@ declare global {
       userId?: string;
       companyId?: string;
       apiKeyId?: string;
+      instanceId?: string;
     }
   }
 }

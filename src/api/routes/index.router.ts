@@ -3,6 +3,7 @@ import { instanceExistsGuard, instanceLoggedGuard } from '@api/guards/instance.g
 import Telemetry from '@api/guards/telemetry.guard';
 import { ChannelRouter } from '@api/integrations/channel/channel.router';
 import { ChatbotRouter } from '@api/integrations/chatbot/chatbot.router';
+import { LlmModelRouter } from '@api/integrations/chatbot/llm/llm.router';
 import { EventRouter } from '@api/integrations/event/event.router';
 import { StorageRouter } from '@api/integrations/storage/storage.router';
 import { waMonitor } from '@api/server.module';
@@ -41,23 +42,45 @@ const router: Router = Router();
 const serverConfig = configService.get('SERVER');
 const databaseConfig = configService.get<Database>('DATABASE');
 const guards = [instanceExistsGuard, instanceLoggedGuard, authGuard['apikey']];
+const llmGuards = [authGuard['apikey']];
 
 const telemetry = new Telemetry();
 
 const packageJson = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
+const WA_WEB_VERSION_TTL_MS = 10 * 60 * 1000;
+let cachedWaWebVersion: { value: string; fetchedAt: number } | null = null;
+
+const getCachedWaWebVersion = async (): Promise<string | undefined> => {
+  const now = Date.now();
+  if (cachedWaWebVersion && now - cachedWaWebVersion.fetchedAt < WA_WEB_VERSION_TTL_MS) {
+    return cachedWaWebVersion.value;
+  }
+
+  try {
+    const version = (await fetchLatestWaWebVersion({})).version.join('.');
+    cachedWaWebVersion = { value: version, fetchedAt: now };
+    return version;
+  } catch {
+    return cachedWaWebVersion?.value;
+  }
+};
 
 // Middleware for metrics IP whitelist
 const metricsIPWhitelist = (req: Request, res: Response, next: NextFunction) => {
   const metricsConfig = configService.get('METRICS');
-  const allowedIPs = metricsConfig.ALLOWED_IPS?.split(',').map((ip) => ip.trim()) || ['127.0.0.1'];
-  const clientIPs = [
-    req.ip,
-    req.connection.remoteAddress,
-    req.socket.remoteAddress,
-    req.headers['x-forwarded-for'],
-  ].filter((ip) => ip !== undefined);
+  const normalizeIp = (ip: string) => ip.replace(/^::ffff:/, '');
+  const allowedIPs = metricsConfig.ALLOWED_IPS?.split(',').map((ip) => normalizeIp(ip.trim())) || ['127.0.0.1'];
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const forwardedIPs = Array.isArray(forwardedFor)
+    ? forwardedFor
+    : typeof forwardedFor === 'string'
+      ? forwardedFor.split(',').map((ip) => ip.trim())
+      : [];
+  const clientIPs = [req.ip, req.connection.remoteAddress, req.socket.remoteAddress, ...forwardedIPs]
+    .filter(Boolean)
+    .map((ip) => normalizeIp(String(ip)));
 
-  if (allowedIPs.filter((ip) => clientIPs.includes(ip)) === 0) {
+  if (!allowedIPs.some((ip) => clientIPs.includes(ip))) {
     return res.status(403).send('Forbidden: IP not allowed');
   }
 
@@ -196,6 +219,7 @@ router
   .use((req, res, next) => telemetry.collectTelemetry(req, res, next))
 
   .get('/', async (req, res) => {
+    const whatsappWebVersion = await getCachedWaWebVersion();
     res.status(HttpStatus.OK).json({
       status: HttpStatus.OK,
       message: 'Welcome to the Evolution API, it is working!',
@@ -203,7 +227,7 @@ router
       clientName: databaseConfig.CONNECTION.CLIENT_NAME,
       manager: !serverConfig.DISABLE_MANAGER ? `${req.protocol}://${req.get('host')}/manager` : undefined,
       documentation: `https://doc.evolution-api.com`,
-      whatsappWebVersion: (await fetchLatestWaWebVersion({})).version.join('.'),
+      whatsappWebVersion,
     });
   })
   .post('/verify-creds', authGuard['apikey'], async (req, res) => {
@@ -225,6 +249,7 @@ router
   .use('/business', new BusinessRouter(...guards).router)
   .use('/group', new GroupRouter(...guards).router)
   .use('/template', new TemplateRouter(configService, ...guards).router)
+  .use('/llm-models', new LlmModelRouter(...llmGuards).router)
   .use('/settings', new SettingsRouter(...guards).router)
   .use('/proxy', new ProxyRouter(...guards).router)
   .use('/label', new LabelRouter(...guards).router)

@@ -1,55 +1,24 @@
 import { InstanceDto } from '@api/dto/instance.dto';
 import { PrismaRepository } from '@api/repository/repository.service';
-import { CacheService } from '@api/services/cache.service';
+import { ConfigService } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 
+import { AgnoCache } from '../../agno/agno-cache';
 import { FunnelDto, FunnelSessionDto } from '../dto/funnel.dto';
 
 export class FunnelService {
   private readonly logger = new Logger('FunnelService');
+  private readonly agnoCache: AgnoCache;
 
   constructor(
     private readonly prismaRepository: PrismaRepository,
-    private readonly cache?: CacheService,
-  ) {}
-
-  private promptCacheKey(instanceId: string): string {
-    return `prompt-funnel:${instanceId}`;
-  }
-
-  private async updatePromptFunnelCache(funnel: { id: string; instanceId: string; stages?: any }) {
-    if (!this.cache) return;
-    const bots = await this.prismaRepository.n8n.findMany({
-      where: { instanceId: funnel.instanceId, funnelId: funnel.id },
-      select: { id: true, prompt: true, funnelId: true, instanceId: true },
-    });
-
-    if (!bots.length) return;
-
-    await this.updatePromptFunnelCacheForBots(bots, funnel.id, funnel.stages ?? []);
-  }
-
-  private async updatePromptFunnelCacheForBots(
-    bots: Array<{ id: string; prompt: string | null; funnelId: string | null; instanceId: string }>,
-    funnelId: string,
-    stages: any[],
+    configService: ConfigService,
   ) {
-    if (!this.cache || !bots.length) return;
+    this.agnoCache = new AgnoCache(configService);
+  }
 
-    const payloadBase = {
-      funnelId,
-      stages,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await Promise.all(
-      bots.map((bot) =>
-        this.cache.hSet(this.promptCacheKey(bot.instanceId), bot.id, {
-          prompt: bot.prompt || null,
-          ...payloadBase,
-        }),
-      ),
-    );
+  private funnelCacheKey(funnelId: string): string {
+    return `funnel:${funnelId}`;
   }
 
   private normalizeStages(stages: unknown): Array<Record<string, any>> | undefined {
@@ -98,7 +67,7 @@ export class FunnelService {
       },
     });
 
-    await this.updatePromptFunnelCache({ id: funnel.id, instanceId: funnel.instanceId, stages: funnel.stages });
+    await this.agnoCache.delete(this.funnelCacheKey(funnel.id));
     return funnel;
   }
 
@@ -144,7 +113,7 @@ export class FunnelService {
       data: updateData,
     });
 
-    await this.updatePromptFunnelCache({ id: funnel.id, instanceId: funnel.instanceId, stages: funnel.stages });
+    await this.agnoCache.delete(this.funnelCacheKey(funnel.id));
     return funnel;
   }
 
@@ -155,11 +124,7 @@ export class FunnelService {
     }
 
     const instanceRecord = await this.resolveInstance(instance);
-    const bots = await this.prismaRepository.n8n.findMany({
-      where: { instanceId: instanceRecord.id, funnelId: existing.id },
-      select: { id: true, prompt: true, funnelId: true, instanceId: true },
-    });
-    await this.prismaRepository.n8n.updateMany({
+    await this.prismaRepository.agno.updateMany({
       where: { instanceId: instanceRecord.id, funnelId: existing.id },
       data: { funnelId: null },
     });
@@ -177,7 +142,7 @@ export class FunnelService {
       where: { id: existing.id },
     });
 
-    await this.updatePromptFunnelCacheForBots(bots, existing.id, []);
+    await this.agnoCache.delete(this.funnelCacheKey(existing.id));
     return { deleted: true };
   }
 

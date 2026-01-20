@@ -54,7 +54,6 @@ This security policy applies to:
 
 The following are generally considered out of scope:
 
-- Third-party integrations (Chatwoot, Typebot, etc.) - please report to respective projects
 - Issues in dependencies - please report to the dependency maintainers
 - Social engineering attacks
 - Physical attacks

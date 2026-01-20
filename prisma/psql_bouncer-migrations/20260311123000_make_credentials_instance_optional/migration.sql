@@ -1,0 +1,1 @@
+ALTER TABLE "Credentials" ALTER COLUMN "instanceId" DROP NOT NULL;

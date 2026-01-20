@@ -10,6 +10,10 @@ const databaseProviderDefault = DATABASE_PROVIDER ?? 'postgresql';
 if (!DATABASE_PROVIDER) {
   console.warn(`DATABASE_PROVIDER is not set in the .env file, using default: ${databaseProviderDefault}`);
 }
+if (databaseProviderDefault === 'mysql') {
+  console.error('DATABASE_PROVIDER mysql is no longer supported.');
+  process.exit(1);
+}
 
 // Função para determinar qual pasta de migrations usar
 // Função para determinar qual pasta de migrations usar

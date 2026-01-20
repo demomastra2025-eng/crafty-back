@@ -13,7 +13,7 @@ import { chatbotController } from '@api/server.module';
 import { CacheService } from '@api/services/cache.service';
 import { ChannelStartupService } from '@api/services/channel.service';
 import { Events, wa } from '@api/types/wa.types';
-import { AudioConverter, Chatwoot, ConfigService, Openai, S3 } from '@config/env.config';
+import { AudioConverter, ConfigService, Openai, S3 } from '@config/env.config';
 import { BadRequestException, InternalServerErrorException } from '@exceptions';
 import { createJid } from '@utils/createJid';
 import { sendTelemetry } from '@utils/sendTelemetry';
@@ -31,9 +31,8 @@ export class EvolutionStartupService extends ChannelStartupService {
     public readonly eventEmitter: EventEmitter2,
     public readonly prismaRepository: PrismaRepository,
     public readonly cache: CacheService,
-    public readonly chatwootCache: CacheService,
   ) {
-    super(configService, eventEmitter, prismaRepository, chatwootCache);
+    super(configService, eventEmitter, prismaRepository);
 
     this.client = null;
   }
@@ -75,21 +74,6 @@ export class EvolutionStartupService extends ChannelStartupService {
     this.instance.number = instance.number;
     this.instance.token = instance.token;
     this.instance.businessId = instance.businessId;
-
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-      this.chatwootService.eventWhatsapp(
-        Events.STATUS_INSTANCE,
-        {
-          instanceName: this.instance.name,
-          instanceId: this.instance.id,
-          integration: instance.integration,
-        },
-        {
-          instance: this.instance.name,
-          status: 'created',
-        },
-      );
-    }
   }
 
   public async profilePicture(number: string) {
@@ -115,7 +99,6 @@ export class EvolutionStartupService extends ChannelStartupService {
 
   public async connectToWhatsapp(data?: any): Promise<any> {
     if (!data) {
-      this.loadChatwoot();
       return;
     }
 
@@ -161,6 +144,15 @@ export class EvolutionStartupService extends ChannelStartupService {
               messageRaw.message.imageCaption = caption;
             }
           }
+          if (
+            received?.message?.documentMessage ||
+            received?.message?.associatedChildMessage?.message?.documentMessage
+          ) {
+            const pdfText = await this.openaiService.extractPdfTextSystem(received, this);
+            if (pdfText) {
+              messageRaw.message.documentText = `[pdf] ${pdfText}`;
+            }
+          }
         }
 
         this.logger.log(messageRaw);
@@ -175,20 +167,6 @@ export class EvolutionStartupService extends ChannelStartupService {
           msg: messageRaw,
           pushName: messageRaw.pushName,
         });
-
-        if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-          const chatwootSentMessage = await this.chatwootService.eventWhatsapp(
-            Events.MESSAGES_UPSERT,
-            { instanceName: this.instance.name, instanceId: this.instanceId },
-            messageRaw,
-          );
-
-          if (chatwootSentMessage?.id) {
-            messageRaw.chatwootMessageId = chatwootSentMessage.id;
-            messageRaw.chatwootInboxId = chatwootSentMessage.id;
-            messageRaw.chatwootConversationId = chatwootSentMessage.id;
-          }
-        }
 
         await this.prismaRepository.message.create({
           data: messageRaw,
@@ -236,18 +214,6 @@ export class EvolutionStartupService extends ChannelStartupService {
 
     this.sendDataWebhook(Events.CONTACTS_UPSERT, contactRaw);
 
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-      await this.chatwootService.eventWhatsapp(
-        Events.CONTACTS_UPDATE,
-        {
-          instanceName: this.instance.name,
-          instanceId: this.instanceId,
-          integration: this.instance.integration,
-        },
-        contactRaw,
-      );
-    }
-
     const chat = await this.prismaRepository.chat.findFirst({
       where: { instanceId: this.instanceId, remoteJid: data.remoteJid },
     });
@@ -285,6 +251,7 @@ export class EvolutionStartupService extends ChannelStartupService {
     file?: any,
     isIntegration = false,
   ) {
+    void isIntegration;
     try {
       let quoted: any;
       let webhookUrl: any;
@@ -490,6 +457,39 @@ export class EvolutionStartupService extends ChannelStartupService {
               const mediaUrl = await s3Service.getObjectUrl(fullName);
 
               messageRaw.message.mediaUrl = mediaUrl;
+
+              if (this.configService.get<Openai>('OPENAI').ENABLED) {
+                if (mediaType === 'audio') {
+                  try {
+                    const transcription = await this.openaiService.speechToTextSystem(messageRaw, this);
+                    if (transcription) {
+                      messageRaw.message.speechToText = `[audio] ${transcription}`;
+                    }
+                  } catch (error) {
+                    this.logger.error(['OpenAI audio processing failed after media upload', error?.message]);
+                  }
+                }
+                if (mediaType === 'image') {
+                  try {
+                    const caption = await this.openaiService.describeImageSystem(messageRaw, this);
+                    if (caption) {
+                      messageRaw.message.imageCaption = caption;
+                    }
+                  } catch (error) {
+                    this.logger.error(['OpenAI image processing failed after media upload', error?.message]);
+                  }
+                }
+                if (mediaType === 'document') {
+                  try {
+                    const pdfText = await this.openaiService.extractPdfTextSystem(messageRaw, this);
+                    if (pdfText) {
+                      messageRaw.message.documentText = `[pdf] ${pdfText}`;
+                    }
+                  } catch (error) {
+                    this.logger.error(['OpenAI pdf processing failed after media upload', error?.message]);
+                  }
+                }
+              }
             }
           } catch (error) {
             this.logger.error(['Error on upload file to minio', error?.message, error?.stack]);
@@ -501,21 +501,12 @@ export class EvolutionStartupService extends ChannelStartupService {
 
       this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
 
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && !isIntegration) {
-        this.chatwootService.eventWhatsapp(
-          Events.SEND_MESSAGE,
-          { instanceName: this.instance.name, instanceId: this.instanceId },
-          messageRaw,
-        );
-      }
-
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && isIntegration)
-        await chatbotController.emit({
-          instance: { instanceName: this.instance.name, instanceId: this.instanceId },
-          remoteJid: messageRaw.key.remoteJid,
-          msg: messageRaw,
-          pushName: messageRaw.pushName,
-        });
+      await chatbotController.emit({
+        instance: { instanceName: this.instance.name, instanceId: this.instanceId },
+        remoteJid: messageRaw.key.remoteJid,
+        msg: messageRaw,
+        pushName: messageRaw.pushName,
+      });
 
       await this.prismaRepository.message.create({
         data: messageRaw,

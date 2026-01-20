@@ -36,7 +36,7 @@ npm run commit      # Interactive commit with commitizen
 ### Database Management
 ```bash
 # Set database provider first
-export DATABASE_PROVIDER=postgresql  # or mysql
+export DATABASE_PROVIDER=postgresql
 
 # Generate Prisma client (automatically uses DATABASE_PROVIDER env)
 npm run db:generate
@@ -82,7 +82,6 @@ src/
 │   ├── guards/         # Authentication/authorization middleware
 │   ├── integrations/   # External service integrations
 │   │   ├── channel/    # WhatsApp providers (Baileys, Business API, Evolution)
-│   │   ├── chatbot/    # AI/Bot integrations (OpenAI, Dify, Typebot, Chatwoot)
 │   │   ├── event/      # Event systems (WebSocket, RabbitMQ, SQS, NATS, Pusher)
 │   │   └── storage/    # File storage (S3, MinIO)
 │   ├── routes/         # Express route definitions (RouterBroker pattern)
@@ -103,14 +102,9 @@ src/
 - Connection lifecycle management per instance with automatic reconnection
 
 **Chatbot Integrations** (`src/api/integrations/chatbot/`):
-- **EvolutionBot**: Native chatbot with trigger system
-- **Chatwoot**: Customer service platform integration
-- **Typebot**: Visual chatbot flow builder
 - **OpenAI**: AI capabilities including GPT and Whisper (audio transcription)
-- **Dify**: AI agent workflow platform
-- **Flowise**: LangChain visual builder
-- **N8N**: Workflow automation platform
-- **EvoAI**: Custom AI integration
+- **Agno**: Agent-driven chatbot workflows
+- **Funnel**: Follow-up and funnel orchestration
 
 **Event Integrations** (`src/api/integrations/event/`):
 - **WebSocket**: Real-time Socket.io connections
@@ -125,7 +119,7 @@ src/
 - Media file management and URL generation
 
 ### Database Schema Management
-- Separate schema files: `postgresql-schema.prisma` and `mysql-schema.prisma`
+- Separate schema files: `postgresql-schema.prisma`
 - Environment variable `DATABASE_PROVIDER` determines active database
 - Migration folders are provider-specific and auto-selected during deployment
 
@@ -166,7 +160,7 @@ src/
 Key environment variables are defined in `.env.example`. The system uses a strongly-typed configuration system via `src/config/env.config.ts`.
 
 Critical configurations:
-- `DATABASE_PROVIDER`: postgresql or mysql
+- `DATABASE_PROVIDER`: postgresql
 - `DATABASE_CONNECTION_URI`: Database connection string
 - `AUTHENTICATION_API_KEY`: Global API authentication
 - `REDIS_ENABLED`: Enable Redis cache

@@ -78,6 +78,7 @@ export const textMessageSchema: JSONSchema7 = {
       description: 'Enter a value in milliseconds',
     },
     quoted: { ...quotedOptionsSchema },
+    mentionsEveryOne: { type: 'boolean', enum: [true, false] },
     everyOne: { type: 'boolean', enum: [true, false] },
     mentioned: {
       type: 'array',
@@ -109,6 +110,7 @@ export const mediaMessageSchema: JSONSchema7 = {
       description: 'Enter a value in milliseconds',
     },
     quoted: { ...quotedOptionsSchema },
+    mentionsEveryOne: { type: 'boolean', enum: [true, false] },
     everyOne: { type: 'boolean', enum: [true, false] },
     mentioned: {
       type: 'array',

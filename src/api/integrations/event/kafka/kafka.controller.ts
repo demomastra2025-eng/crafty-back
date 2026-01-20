@@ -300,7 +300,7 @@ export class KafkaController extends EventController implements EventControllerI
 
     // Instance-specific events
     if (instanceKafka?.enabled && this.producer && Array.isArray(kafkaLocal) && kafkaLocal.includes(we)) {
-      const topicName = this.getTopicName(event, false, instanceName);
+      const topicName = this.getTopicName(we, false, instanceName);
 
       let retry = 0;
       while (retry < 3) {
@@ -346,7 +346,7 @@ export class KafkaController extends EventController implements EventControllerI
 
     // Global events
     if (kafkaGlobal && kafkaEvents[we] && this.producer) {
-      const topicName = this.getTopicName(event, true);
+      const topicName = this.getTopicName(we, true);
 
       let retry = 0;
       while (retry < 3) {

@@ -1,6 +1,7 @@
 import { advancedOperatorsSearch } from './advancedOperatorsSearch';
 
 export const findBotByTrigger = async (botRepository: any, content: string, instanceId: string) => {
+  const safeContent = typeof content === 'string' ? content : '';
   // Check for triggerType 'all' or 'none' (both should match any message)
   const findTriggerAllOrNone = await botRepository.findFirst({
     where: {
@@ -24,7 +25,7 @@ export const findBotByTrigger = async (botRepository: any, content: string, inst
     },
   });
   for (const advanced of findTriggerAdvanced) {
-    if (advancedOperatorsSearch(content, advanced.triggerValue)) {
+    if (advancedOperatorsSearch(safeContent, advanced.triggerValue)) {
       return advanced;
     }
   }
@@ -35,7 +36,7 @@ export const findBotByTrigger = async (botRepository: any, content: string, inst
       enabled: true,
       triggerType: 'keyword',
       triggerOperator: 'equals',
-      triggerValue: content,
+      triggerValue: safeContent,
       instanceId: instanceId,
     },
   });
@@ -57,9 +58,14 @@ export const findBotByTrigger = async (botRepository: any, content: string, inst
   let findTriggerRegex = null;
 
   for (const regex of findRegex) {
-    const regexValue = new RegExp(regex.triggerValue);
+    let regexValue: RegExp;
+    try {
+      regexValue = new RegExp(regex.triggerValue);
+    } catch {
+      continue;
+    }
 
-    if (regexValue.test(content)) {
+    if (regexValue.test(safeContent)) {
       findTriggerRegex = regex;
       break;
     }
@@ -80,7 +86,7 @@ export const findBotByTrigger = async (botRepository: any, content: string, inst
   let findTriggerStartsWith = null;
 
   for (const startsWith of findStartsWith) {
-    if (content.startsWith(startsWith.triggerValue)) {
+    if (safeContent.startsWith(startsWith.triggerValue)) {
       findTriggerStartsWith = startsWith;
       break;
     }
@@ -101,7 +107,7 @@ export const findBotByTrigger = async (botRepository: any, content: string, inst
   let findTriggerEndsWith = null;
 
   for (const endsWith of findEndsWith) {
-    if (content.endsWith(endsWith.triggerValue)) {
+    if (safeContent.endsWith(endsWith.triggerValue)) {
       findTriggerEndsWith = endsWith;
       break;
     }
@@ -122,7 +128,7 @@ export const findBotByTrigger = async (botRepository: any, content: string, inst
   let findTriggerContains = null;
 
   for (const contains of findContains) {
-    if (content.includes(contains.triggerValue)) {
+    if (safeContent.includes(contains.triggerValue)) {
       findTriggerContains = contains;
       break;
     }

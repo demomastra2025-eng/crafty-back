@@ -1,0 +1,1 @@
+ALTER TABLE "Agno" ADD COLUMN "agentConfig" JSONB;

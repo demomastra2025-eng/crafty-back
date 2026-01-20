@@ -1,5 +1,6 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
+import { Events } from '@api/types/wa.types';
 import { configService, Log, Nats } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { connect, NatsConnection, StringCodec } from 'nats';
@@ -10,6 +11,11 @@ export class NatsController extends EventController implements EventControllerIn
   public natsClient: NatsConnection | null = null;
   private readonly logger = new Logger('NatsController');
   private readonly sc = StringCodec();
+
+  private normalizeEventKey(eventKey: string) {
+    const mapped = (Events as Record<string, string>)[eventKey];
+    return (mapped || eventKey.replace(/_/g, '.')).toLowerCase();
+  }
 
   constructor(prismaRepository: PrismaRepository, waMonitor: WAMonitoringService) {
     super(prismaRepository, waMonitor, configService.get<Nats>('NATS')?.ENABLED, 'nats');
@@ -133,7 +139,8 @@ export class NatsController extends EventController implements EventControllerIn
     for (const event of eventKeys) {
       if (events[event] === false) continue;
 
-      const subject = prefixKey ? `${prefixKey}.${event.toLowerCase()}` : event.toLowerCase();
+      const normalizedEvent = this.normalizeEventKey(event);
+      const subject = prefixKey ? `${prefixKey}.${normalizedEvent}` : normalizedEvent;
 
       // Criar uma subscription para cada evento
       try {

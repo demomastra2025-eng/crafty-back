@@ -20,13 +20,13 @@ import { chatbotController } from '@api/server.module';
 import { CacheService } from '@api/services/cache.service';
 import { ChannelStartupService } from '@api/services/channel.service';
 import { Events, wa } from '@api/types/wa.types';
-import { AudioConverter, Chatwoot, ConfigService, Database, Openai, S3, WaBusiness } from '@config/env.config';
+import { AudioConverter, ConfigService, Database, Openai, S3, WaBusiness } from '@config/env.config';
 import { BadRequestException, InternalServerErrorException } from '@exceptions';
 import { createJid } from '@utils/createJid';
 import { status } from '@utils/renderStatus';
 import { sendTelemetry } from '@utils/sendTelemetry';
 import axios from 'axios';
-import { arrayUnique, isURL } from 'class-validator';
+import { arrayUnique, isBase64, isURL } from 'class-validator';
 import EventEmitter2 from 'eventemitter2';
 import FormData from 'form-data';
 import mimeTypes from 'mime-types';
@@ -38,11 +38,10 @@ export class BusinessStartupService extends ChannelStartupService {
     public readonly eventEmitter: EventEmitter2,
     public readonly prismaRepository: PrismaRepository,
     public readonly cache: CacheService,
-    public readonly chatwootCache: CacheService,
     public readonly baileysCache: CacheService,
     private readonly providerFiles: ProviderFiles,
   ) {
-    super(configService, eventEmitter, prismaRepository, chatwootCache);
+    super(configService, eventEmitter, prismaRepository);
   }
 
   public stateConnection: wa.StateConnection = { state: 'open' };
@@ -129,8 +128,6 @@ export class BusinessStartupService extends ChannelStartupService {
     const content = data.entry[0].changes[0].value;
 
     try {
-      this.loadChatwoot();
-
       this.eventHandler(content);
 
       this.phoneNumber = createJid(content.messages ? content.messages[0].from : content.statuses[0]?.recipient_id);
@@ -386,17 +383,26 @@ export class BusinessStartupService extends ChannelStartupService {
     try {
       let messageRaw: any;
       let pushName: any;
+      const saveMessages = database.SAVE_DATA.NEW_MESSAGE;
+      const saveContacts = database.SAVE_DATA.CONTACTS;
 
       if (received.contacts) pushName = received.contacts[0].profile.name;
 
       if (received.messages) {
         const message = received.messages[0]; // Añadir esta línea para definir message
+        const contactNumber = received?.contacts?.[0]?.profile?.phone || message.from;
+        if (!contactNumber) {
+          this.logger.warn('Missing contact number for incoming message');
+          return;
+        }
+        const contactRemoteJid = createJid(String(contactNumber));
 
         const key = {
           id: message.id,
-          remoteJid: this.phoneNumber,
+          remoteJid: contactRemoteJid,
           fromMe: message.from === received.metadata.phone_number_id,
         };
+        let mediaMeta: { type: string; fileName: string; mimetype: string } | null = null;
 
         if (message.type === 'sticker') {
           this.logger.log('Procesando mensaje de tipo sticker');
@@ -499,21 +505,8 @@ export class BusinessStartupService extends ChannelStartupService {
                   'Content-Type': mimetype,
                 });
 
-                const createdMessage = await this.prismaRepository.message.create({
-                  data: messageRaw,
-                });
-
-                await this.prismaRepository.media.create({
-                  data: {
-                    messageId: createdMessage.id,
-                    instanceId: this.instanceId,
-                    type: mediaType,
-                    fileName: fullName,
-                    mimetype,
-                  },
-                });
-
                 const mediaUrl = await s3Service.getObjectUrl(fullName);
+                mediaMeta = { type: mediaType, fileName: fullName, mimetype };
 
                 messageRaw.message.mediaUrl = mediaUrl;
                 if (this.localWebhook.enabled && this.localWebhook.webhookBase64) {
@@ -539,6 +532,16 @@ export class BusinessStartupService extends ChannelStartupService {
                       }
                     } catch (visionError) {
                       this.logger.error(`Error processing image vision: ${visionError}`);
+                    }
+                  }
+                  if (mediaType === 'document') {
+                    try {
+                      const pdfText = await this.openaiService.extractPdfTextSystem(messageRaw, this);
+                      if (pdfText) {
+                        messageRaw.message.documentText = `[pdf] ${pdfText}`;
+                      }
+                    } catch (pdfError) {
+                      this.logger.error(`Error processing pdf: ${pdfError}`);
                     }
                   }
                 }
@@ -571,6 +574,16 @@ export class BusinessStartupService extends ChannelStartupService {
                   }
                 } catch (visionError) {
                   this.logger.error(`Error processing image vision: ${visionError}`);
+                }
+              }
+              if (message.type === 'document') {
+                try {
+                  const pdfText = await this.openaiService.extractPdfTextSystem(messageRaw, this);
+                  if (pdfText) {
+                    messageRaw.message.documentText = `[pdf] ${pdfText}`;
+                  }
+                } catch (pdfError) {
+                  this.logger.error(`Error processing pdf: ${pdfError}`);
                 }
               }
             }
@@ -657,24 +670,21 @@ export class BusinessStartupService extends ChannelStartupService {
           pushName: messageRaw.pushName,
         });
 
-        if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-          const chatwootSentMessage = await this.chatwootService.eventWhatsapp(
-            Events.MESSAGES_UPSERT,
-            { instanceName: this.instance.name, instanceId: this.instanceId },
-            messageRaw,
-          );
-
-          if (chatwootSentMessage?.id) {
-            messageRaw.chatwootMessageId = chatwootSentMessage.id;
-            messageRaw.chatwootInboxId = chatwootSentMessage.id;
-            messageRaw.chatwootConversationId = chatwootSentMessage.id;
-          }
-        }
-
-        if (!this.isMediaMessage(message) && message.type !== 'sticker') {
-          await this.prismaRepository.message.create({
+        if (saveMessages && messageRaw) {
+          const createdMessage = await this.prismaRepository.message.create({
             data: messageRaw,
           });
+          if (mediaMeta) {
+            await this.prismaRepository.media.create({
+              data: {
+                messageId: createdMessage.id,
+                instanceId: this.instanceId,
+                type: mediaMeta.type,
+                fileName: mediaMeta.fileName,
+                mimetype: mediaMeta.mimetype,
+              },
+            });
+          }
         }
 
         const contact = await this.prismaRepository.contact.findFirst({
@@ -682,7 +692,7 @@ export class BusinessStartupService extends ChannelStartupService {
         });
 
         const contactRaw: any = {
-          remoteJid: received.contacts[0].profile.phone,
+          remoteJid: contactRemoteJid,
           pushName,
           // profilePicUrl: '',
           instanceId: this.instanceId,
@@ -693,42 +703,37 @@ export class BusinessStartupService extends ChannelStartupService {
         }
 
         if (contact) {
-          const contactRaw: any = {
-            remoteJid: received.contacts[0].profile.phone,
-            pushName,
-            // profilePicUrl: '',
-            instanceId: this.instanceId,
-          };
-
           this.sendDataWebhook(Events.CONTACTS_UPDATE, contactRaw);
 
-          if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-            await this.chatwootService.eventWhatsapp(
-              Events.CONTACTS_UPDATE,
-              { instanceName: this.instance.name, instanceId: this.instanceId },
-              contactRaw,
-            );
+          if (saveContacts) {
+            await this.prismaRepository.contact.update({
+              where: { id: contact.id },
+              data: contactRaw,
+            });
           }
-
-          await this.prismaRepository.contact.updateMany({
-            where: { remoteJid: contact.remoteJid },
-            data: contactRaw,
-          });
           return;
         }
 
         this.sendDataWebhook(Events.CONTACTS_UPSERT, contactRaw);
 
-        this.prismaRepository.contact.create({
-          data: contactRaw,
-        });
+        if (saveContacts) {
+          await this.prismaRepository.contact.create({
+            data: contactRaw,
+          });
+        }
       }
       if (received.statuses) {
         for await (const item of received.statuses) {
+          const recipientId = item?.recipient_id || item?.recipientId || item?.recipient;
+          const remoteJid = recipientId ? createJid(String(recipientId)) : this.phoneNumber;
+          if (!remoteJid) {
+            this.logger.warn('Missing remoteJid for status update');
+            continue;
+          }
           const key = {
             id: item.id,
-            remoteJid: this.phoneNumber,
-            fromMe: this.phoneNumber === received.metadata.phone_number_id,
+            remoteJid,
+            fromMe: true,
           };
           if (settings?.groups_ignore && key.remoteJid.includes('@g.us')) {
             return;
@@ -764,14 +769,6 @@ export class BusinessStartupService extends ChannelStartupService {
               await this.prismaRepository.messageUpdate.create({
                 data: message,
               });
-
-              if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-                this.chatwootService.eventWhatsapp(
-                  Events.MESSAGES_DELETE,
-                  { instanceName: this.instance.name, instanceId: this.instanceId },
-                  { key: key },
-                );
-              }
 
               return;
             }
@@ -919,6 +916,7 @@ export class BusinessStartupService extends ChannelStartupService {
   }
 
   protected async sendMessageWithTyping(number: string, message: any, options?: Options, isIntegration = false) {
+    void isIntegration;
     try {
       let quoted: any;
       let webhookUrl: any;
@@ -1121,31 +1119,106 @@ export class BusinessStartupService extends ChannelStartupService {
         webhookUrl,
         status: status[1],
         source: 'unknown',
+        author: options?.author,
       };
+
+      let mediaMeta: { type: string; fileName: string; mimetype: string } | null = null;
+      if (this.configService.get<S3>('S3').ENABLE) {
+        const mediaPayload =
+          messageRaw.message?.imageMessage ||
+          messageRaw.message?.videoMessage ||
+          messageRaw.message?.audioMessage ||
+          messageRaw.message?.documentMessage;
+
+        const mediaType = messageRaw.message?.imageMessage
+          ? 'image'
+          : messageRaw.message?.videoMessage
+            ? 'video'
+            : messageRaw.message?.audioMessage
+              ? 'audio'
+              : messageRaw.message?.documentMessage
+                ? 'document'
+                : null;
+
+        if (mediaPayload?.media && mediaType) {
+          try {
+            const buffer = isURL(mediaPayload.media)
+              ? await axios
+                  .get(mediaPayload.media, { responseType: 'arraybuffer' })
+                  .then((res) => Buffer.from(res.data))
+              : isBase64(mediaPayload.media)
+                ? Buffer.from(mediaPayload.media, 'base64')
+                : null;
+
+            if (buffer) {
+              const fileName = mediaPayload.fileName || `file.${mediaType}`;
+              const mimetype =
+                mediaPayload.mimetype || (mimeTypes.lookup(fileName) as string) || 'application/octet-stream';
+              const fullName = join(
+                `${this.instance.id}`,
+                messageRaw.key.remoteJid,
+                mediaType,
+                `${messageRaw.key.id}_${fileName}`,
+              );
+
+              await s3Service.uploadFile(fullName, buffer, buffer.length, { 'Content-Type': mimetype });
+
+              messageRaw.message.mediaUrl = await s3Service.getObjectUrl(fullName);
+              mediaMeta = { type: mediaType, fileName: fullName, mimetype };
+
+              if (this.configService.get<Openai>('OPENAI').ENABLED) {
+                if (mediaType === 'audio') {
+                  const transcription = await this.openaiService.speechToTextSystem(messageRaw, this);
+                  if (transcription) {
+                    messageRaw.message.speechToText = `[audio] ${transcription}`;
+                  }
+                } else if (mediaType === 'image') {
+                  const caption = await this.openaiService.describeImageSystem(messageRaw, this);
+                  if (caption) {
+                    messageRaw.message.imageCaption = caption;
+                  }
+                } else if (mediaType === 'document') {
+                  const pdfText = await this.openaiService.extractPdfTextSystem(messageRaw, this);
+                  if (pdfText) {
+                    messageRaw.message.documentText = `[pdf] ${pdfText}`;
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            this.logger.error(['Error on upload file to minio', error?.message]);
+          }
+        }
+      }
 
       this.logger.log(messageRaw);
 
       this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
 
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && !isIntegration) {
-        this.chatwootService.eventWhatsapp(
-          Events.SEND_MESSAGE,
-          { instanceName: this.instance.name, instanceId: this.instanceId },
-          messageRaw,
-        );
-      }
+      await chatbotController.emit({
+        instance: { instanceName: this.instance.name, instanceId: this.instanceId },
+        remoteJid: messageRaw.key.remoteJid,
+        msg: messageRaw,
+        pushName: messageRaw.pushName,
+      });
 
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && isIntegration)
-        await chatbotController.emit({
-          instance: { instanceName: this.instance.name, instanceId: this.instanceId },
-          remoteJid: messageRaw.key.remoteJid,
-          msg: messageRaw,
-          pushName: messageRaw.pushName,
+      if (this.configService.get<Database>('DATABASE').SAVE_DATA.NEW_MESSAGE) {
+        const createdMessage = await this.prismaRepository.message.create({
+          data: messageRaw,
         });
 
-      await this.prismaRepository.message.create({
-        data: messageRaw,
-      });
+        if (mediaMeta) {
+          await this.prismaRepository.media.create({
+            data: {
+              messageId: createdMessage.id,
+              instanceId: this.instanceId,
+              type: mediaMeta.type,
+              fileName: mediaMeta.fileName,
+              mimetype: mediaMeta.mimetype,
+            },
+          });
+        }
+      }
 
       return messageRaw;
     } catch (error) {

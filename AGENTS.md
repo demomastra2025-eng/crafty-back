@@ -15,7 +15,6 @@ This document provides comprehensive guidelines for AI agents (Claude, GPT, Curs
   - `api/routes/` – Express route definitions (RouterBroker pattern)
   - `api/integrations/` – External service integrations
     - `channel/` – WhatsApp providers (Baileys, Business API, Evolution)
-    - `chatbot/` – AI/Bot integrations (OpenAI, Dify, Typebot, Chatwoot)
     - `event/` – Event systems (WebSocket, RabbitMQ, SQS, NATS, Pusher)
     - `storage/` – File storage (S3, MinIO)
   - `dto/` – Data Transfer Objects (simple classes, no decorators)
@@ -23,8 +22,8 @@ This document provides comprehensive guidelines for AI agents (Claude, GPT, Curs
   - `types/` – TypeScript type definitions
   - `repository/` – Data access layer (Prisma)
 - **`prisma/`** – Database schemas and migrations
-  - `postgresql-schema.prisma` / `mysql-schema.prisma` – Provider-specific schemas
-  - `postgresql-migrations/` / `mysql-migrations/` – Provider-specific migrations
+  - `postgresql-schema.prisma` – Provider-specific schemas
+  - `postgresql-migrations/` – Provider-specific migrations
 - **`config/`** – Environment and application configuration
 - **`utils/`** – Shared utilities and helper functions
 - **`validate/`** – JSONSchema7 validation schemas
@@ -64,7 +63,7 @@ npm run commit      # Interactive commit with Commitizen
 ### Database Management
 ```bash
 # Set database provider first (CRITICAL)
-export DATABASE_PROVIDER=postgresql  # or mysql
+export DATABASE_PROVIDER=postgresql
 
 # Generate Prisma client
 npm run db:generate
@@ -214,7 +213,7 @@ if (!waInstance) {
 ### Multi-Provider Support
 - **PostgreSQL**: Uses `@db.Integer`, `@db.JsonB`, `@default(now())`
 - **MySQL**: Uses `@db.Int`, `@db.Json`, `@default(now())`
-- **Environment**: Set `DATABASE_PROVIDER=postgresql` or `mysql`
+- **Environment**: Set `DATABASE_PROVIDER=postgresql`
 - **Migrations**: Provider-specific folders auto-selected
 
 ### Prisma Repository Pattern
@@ -237,7 +236,6 @@ const result = await this.prismaRepository.instance.findUnique({
 - **Base classes**: Extend `BaseChatbotService` and `BaseChatbotController`
 - **Trigger system**: Support keyword, regex, and advanced triggers
 - **Session management**: Handle conversation state per user
-- **Available integrations**: EvolutionBot, OpenAI, Dify, Typebot, Chatwoot, Flowise, N8N, EvoAI
 
 ### Event Integration
 - **Internal events**: EventEmitter2 for application events
@@ -304,7 +302,7 @@ cp .env.example .env
 
 # NEVER commit secrets to version control
 # Set DATABASE_PROVIDER before database commands
-export DATABASE_PROVIDER=postgresql  # or mysql
+export DATABASE_PROVIDER=postgresql
 ```
 
 ### Security Best Practices
@@ -352,4 +350,3 @@ export DATABASE_PROVIDER=postgresql  # or mysql
 - **Error tracking**: Comprehensive error scenarios
 - **Health checks**: Instance status and connection monitoring
 - **Telemetry**: Usage analytics (non-sensitive data only)
-

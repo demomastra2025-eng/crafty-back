@@ -1,0 +1,1 @@
+ALTER TABLE "Agno" ADD COLUMN "webhookUrl" VARCHAR(500);

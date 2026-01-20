@@ -62,7 +62,11 @@ export class InstanceRouter extends RouterBroker {
           request: req,
           schema: null,
           ClassRef: InstanceDto,
-          execute: (instance) => instanceController.fetchInstances({ ...instance, companyId: req.companyId }, key),
+          execute: (instance) => {
+            const instanceId = req.instanceId || instance.instanceId;
+            const companyId = req.instanceId ? undefined : req.companyId;
+            return instanceController.fetchInstances({ ...instance, instanceId, companyId }, key);
+          },
         });
 
         return res.status(HttpStatus.OK).json(response);

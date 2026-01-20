@@ -18,7 +18,7 @@ import { chatbotController } from '@api/server.module';
 import { CacheService } from '@api/services/cache.service';
 import { ChannelStartupService } from '@api/services/channel.service';
 import { Events, wa } from '@api/types/wa.types';
-import { Chatwoot, ConfigService, Database, Openai, S3, TelegramBot } from '@config/env.config';
+import { ConfigService, Database, Openai, S3, TelegramBot } from '@config/env.config';
 import { BadRequestException } from '@exceptions';
 import { status } from '@utils/renderStatus';
 import { sendTelemetry } from '@utils/sendTelemetry';
@@ -44,11 +44,10 @@ export class TelegramBotStartupService extends ChannelStartupService {
     public readonly eventEmitter: EventEmitter2,
     public readonly prismaRepository: PrismaRepository,
     public readonly cache: CacheService,
-    public readonly chatwootCache: CacheService,
     public readonly baileysCache: CacheService,
     private readonly providerFiles: ProviderFiles,
   ) {
-    super(configService, eventEmitter, prismaRepository, chatwootCache);
+    super(configService, eventEmitter, prismaRepository);
   }
 
   public stateConnection: wa.StateConnection = { state: 'open' };
@@ -128,13 +127,54 @@ export class TelegramBotStartupService extends ChannelStartupService {
     return String(chatId).split('@')[0];
   }
 
+  private shouldSaveMessages() {
+    return this.configService.get<Database>('DATABASE').SAVE_DATA.NEW_MESSAGE;
+  }
+
+  private addAuthor(messageRaw: any, author?: string) {
+    if (author) {
+      messageRaw.author = author;
+    }
+  }
+
+  private async persistMessage(
+    messageRaw: any,
+    mediaMeta?: { type: string; fileName: string; mimetype: string } | null,
+  ) {
+    const createdMessage = await this.prismaRepository.message.create({ data: messageRaw });
+    if (!mediaMeta) return;
+
+    await this.prismaRepository.media.create({
+      data: {
+        messageId: createdMessage.id,
+        instanceId: this.instanceId,
+        type: mediaMeta.type,
+        fileName: mediaMeta.fileName,
+        mimetype: mediaMeta.mimetype,
+      },
+    });
+  }
+
   private async ensureChat(remoteJid: string, name: string | null, fromMe: boolean) {
     if (!remoteJid) return;
     const existingChat = await this.prismaRepository.chat.findFirst({
       where: { instanceId: this.instanceId, remoteJid },
     });
 
-    if (existingChat) return;
+    if (existingChat) {
+      if (!fromMe) {
+        const unreadMessages = (existingChat.unreadMessages || 0) + 1;
+        this.sendDataWebhook(Events.CHATS_UPDATE, [{ remoteJid, instanceId: this.instanceId, unreadMessages }]);
+
+        if (this.configService.get<Database>('DATABASE').SAVE_DATA.CHATS) {
+          await this.prismaRepository.chat.update({
+            where: { id: existingChat.id },
+            data: { unreadMessages },
+          });
+        }
+      }
+      return;
+    }
 
     const chatRaw = {
       remoteJid,
@@ -185,7 +225,8 @@ export class TelegramBotStartupService extends ChannelStartupService {
       return false;
     }
 
-    let createdMessageId: string | undefined;
+    const saveMessages = this.shouldSaveMessages();
+    let mediaMeta: { type: string; fileName: string; mimetype: string } | null = null;
 
     if (this.configService.get<S3>('S3').ENABLE) {
       const buffer = await this.downloadFile(fileUrl);
@@ -202,18 +243,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
       if (this.localWebhook.enabled && this.localWebhook.webhookBase64) {
         messageRaw.message.base64 = buffer.toString('base64');
       }
-
-      const createdMessage = await this.prismaRepository.message.create({ data: messageRaw });
-      createdMessageId = createdMessage.id;
-      await this.prismaRepository.media.create({
-        data: {
-          messageId: createdMessage.id,
-          instanceId: this.instanceId,
-          type: mediaType,
-          fileName: fullName,
-          mimetype: mimeType.toString(),
-        },
-      });
+      mediaMeta = { type: mediaType, fileName: fullName, mimetype: mimeType.toString() };
     } else {
       messageRaw.message.mediaUrl = fileUrl;
       if (this.localWebhook.enabled && this.localWebhook.webhookBase64) {
@@ -245,17 +275,24 @@ export class TelegramBotStartupService extends ChannelStartupService {
           this.logger.error(`OpenAI image processing failed: ${error}`);
         }
       }
+      if (mediaType === 'document') {
+        try {
+          const pdfText = await this.openaiService.extractPdfTextSystem(messageRaw, this);
+          if (pdfText) {
+            messageRaw.message.documentText = `[pdf] ${pdfText}`;
+          }
+        } catch (error) {
+          this.logger.error(`OpenAI pdf processing failed: ${error}`);
+        }
+      }
     }
 
-    if (createdMessageId) {
-      await this.prismaRepository.message.update({
-        where: { id: createdMessageId },
-        data: messageRaw,
-      });
-      return true;
+    if (!saveMessages) {
+      return false;
     }
 
-    return false;
+    await this.persistMessage(messageRaw, mediaMeta);
+    return true;
   }
 
   protected async messageHandle(update: TelegramUpdate) {
@@ -298,7 +335,9 @@ export class TelegramBotStartupService extends ChannelStartupService {
         await this.apiRequest('answerCallbackQuery', { callback_query_id: callbackQuery.id });
       }
 
+      const saveMessages = this.shouldSaveMessages();
       let messageStored = false;
+      const shouldPersistMedia = !isEdited;
 
       if (callbackQuery?.data) {
         messageRaw.message = { conversation: callbackQuery.data };
@@ -312,25 +351,31 @@ export class TelegramBotStartupService extends ChannelStartupService {
           imageMessage: { fileId: photo.file_id, caption: message.caption || '' },
         };
         messageRaw.messageType = 'imageMessage';
-        messageStored = await this.handleIncomingMedia(photo.file_id, 'image', messageRaw);
+        messageStored = shouldPersistMedia ? await this.handleIncomingMedia(photo.file_id, 'image', messageRaw) : false;
       } else if (message?.video) {
         messageRaw.message = {
           videoMessage: { fileId: message.video.file_id, caption: message.caption || '' },
         };
         messageRaw.messageType = 'videoMessage';
-        messageStored = await this.handleIncomingMedia(message.video.file_id, 'video', messageRaw);
+        messageStored = shouldPersistMedia
+          ? await this.handleIncomingMedia(message.video.file_id, 'video', messageRaw)
+          : false;
       } else if (message?.audio) {
         messageRaw.message = {
           audioMessage: { fileId: message.audio.file_id },
         };
         messageRaw.messageType = 'audioMessage';
-        messageStored = await this.handleIncomingMedia(message.audio.file_id, 'audio', messageRaw);
+        messageStored = shouldPersistMedia
+          ? await this.handleIncomingMedia(message.audio.file_id, 'audio', messageRaw)
+          : false;
       } else if (message?.voice) {
         messageRaw.message = {
           audioMessage: { fileId: message.voice.file_id },
         };
         messageRaw.messageType = 'audioMessage';
-        messageStored = await this.handleIncomingMedia(message.voice.file_id, 'audio', messageRaw);
+        messageStored = shouldPersistMedia
+          ? await this.handleIncomingMedia(message.voice.file_id, 'audio', messageRaw)
+          : false;
       } else if (message?.document) {
         const mimeType = message.document.mime_type || '';
         const isImageDoc = mimeType.startsWith('image/');
@@ -340,20 +385,26 @@ export class TelegramBotStartupService extends ChannelStartupService {
             imageMessage: { fileId: message.document.file_id, caption: message.caption || '' },
           };
           messageRaw.messageType = 'imageMessage';
-          messageStored = await this.handleIncomingMedia(message.document.file_id, 'image', messageRaw);
+          messageStored = shouldPersistMedia
+            ? await this.handleIncomingMedia(message.document.file_id, 'image', messageRaw)
+            : false;
         } else {
           messageRaw.message = {
             documentMessage: { fileId: message.document.file_id, caption: message.caption || '' },
           };
           messageRaw.messageType = 'documentMessage';
-          messageStored = await this.handleIncomingMedia(message.document.file_id, 'document', messageRaw);
+          messageStored = shouldPersistMedia
+            ? await this.handleIncomingMedia(message.document.file_id, 'document', messageRaw)
+            : false;
         }
       } else if (message?.sticker) {
         messageRaw.message = {
           stickerMessage: { fileId: message.sticker.file_id },
         };
         messageRaw.messageType = 'stickerMessage';
-        messageStored = await this.handleIncomingMedia(message.sticker.file_id, 'sticker', messageRaw);
+        messageStored = shouldPersistMedia
+          ? await this.handleIncomingMedia(message.sticker.file_id, 'sticker', messageRaw)
+          : false;
       } else if (message?.location) {
         messageRaw.message = {
           locationMessage: {
@@ -374,15 +425,38 @@ export class TelegramBotStartupService extends ChannelStartupService {
         messageRaw.messageType = 'conversation';
       }
 
-      sendTelemetry(`received.message.${messageRaw.messageType ?? 'unknown'}`);
+      if (isEdited && saveMessages) {
+        const existing = await this.prismaRepository.message.findFirst({
+          where: {
+            instanceId: this.instanceId,
+            key: { path: ['id'], equals: messageRaw.key.id },
+          },
+        });
+        const editedText = message?.text ?? message?.caption;
+        if (existing && editedText !== undefined) {
+          const updatedMessage = (existing.message || {}) as any;
+          const existingType = existing.messageType;
+          if (existingType === 'conversation' || existingType === 'extendedTextMessage') {
+            updatedMessage.conversation = editedText;
+          } else if (existingType && updatedMessage[existingType]) {
+            updatedMessage[existingType].caption = editedText;
+          } else {
+            updatedMessage.conversation = editedText;
+          }
 
-      if (isEdited && this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-        this.chatwootService.eventWhatsapp(
-          'messages.edit',
-          { instanceName: this.instance.name, instanceId: this.instanceId },
-          messageRaw,
-        );
+          await this.prismaRepository.message.update({
+            where: { id: existing.id },
+            data: {
+              message: updatedMessage,
+              messageType: existingType || messageRaw.messageType,
+            },
+          });
+          messageRaw.messageType = existingType || messageRaw.messageType;
+          messageStored = true;
+        }
       }
+
+      sendTelemetry(`received.message.${messageRaw.messageType ?? 'unknown'}`);
 
       this.sendDataWebhook(eventName, messageRaw);
 
@@ -393,22 +467,8 @@ export class TelegramBotStartupService extends ChannelStartupService {
         pushName: messageRaw.pushName,
       });
 
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-        const chatwootSentMessage = await this.chatwootService.eventWhatsapp(
-          Events.MESSAGES_UPSERT,
-          { instanceName: this.instance.name, instanceId: this.instanceId },
-          messageRaw,
-        );
-
-        if (chatwootSentMessage?.id) {
-          messageRaw.chatwootMessageId = chatwootSentMessage.id;
-          messageRaw.chatwootInboxId = chatwootSentMessage.id;
-          messageRaw.chatwootConversationId = chatwootSentMessage.id;
-        }
-      }
-
-      if (!messageStored) {
-        await this.prismaRepository.message.create({ data: messageRaw });
+      if (!messageStored && saveMessages) {
+        await this.persistMessage(messageRaw);
       }
 
       await this.ensureChat(remoteJid, pushName || null, false);
@@ -420,14 +480,6 @@ export class TelegramBotStartupService extends ChannelStartupService {
       };
 
       this.sendDataWebhook(Events.CONTACTS_UPSERT, contactRaw);
-
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-        await this.chatwootService.eventWhatsapp(
-          Events.CONTACTS_UPSERT,
-          { instanceName: this.instance.name, instanceId: this.instanceId },
-          contactRaw,
-        );
-      }
 
       if (this.configService.get<Database>('DATABASE').SAVE_DATA.CONTACTS) {
         await this.prismaRepository.contact.upsert({
@@ -444,7 +496,6 @@ export class TelegramBotStartupService extends ChannelStartupService {
   public async connectToWhatsapp(data?: TelegramUpdate): Promise<any> {
     if (!data) return;
     try {
-      this.loadChatwoot();
       this.loadSettings();
       this.loadWebhook();
       await this.ensureBotProfileName();
@@ -456,6 +507,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
   }
 
   public async textMessage(data: SendTextDto, isIntegration = false) {
+    void isIntegration;
     try {
       const chatId = this.normalizeChatId(data.number);
       await this.ensureBotProfileName();
@@ -477,27 +529,13 @@ export class TelegramBotStartupService extends ChannelStartupService {
         status: status[1],
         source: 'unknown',
       };
+      this.addAuthor(messageRaw, data?.author);
 
       this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
 
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && !isIntegration) {
-        this.chatwootService.eventWhatsapp(
-          Events.SEND_MESSAGE,
-          { instanceName: this.instance.name, instanceId: this.instanceId },
-          messageRaw,
-        );
+      if (this.shouldSaveMessages()) {
+        await this.persistMessage(messageRaw);
       }
-
-      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && isIntegration) {
-        await chatbotController.emit({
-          instance: { instanceName: this.instance.name, instanceId: this.instanceId },
-          remoteJid: messageRaw.key.remoteJid,
-          msg: messageRaw,
-          pushName: messageRaw.pushName,
-        });
-      }
-
-      await this.prismaRepository.message.create({ data: messageRaw });
       await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
       return messageRaw;
@@ -508,6 +546,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
   }
 
   public async mediaMessage(data: SendMediaDto, file?: any, isIntegration = false) {
+    void isIntegration;
     const chatId = this.normalizeChatId(data.number);
     const caption = data.caption || '';
     const parseMode = data.parseMode;
@@ -576,6 +615,7 @@ export class TelegramBotStartupService extends ChannelStartupService {
       status: status[1],
       source: 'unknown',
     };
+    this.addAuthor(messageRaw, data?.author);
 
     if (mediaType === 'image') {
       messageRaw.message = { imageMessage: { caption } };
@@ -591,32 +631,68 @@ export class TelegramBotStartupService extends ChannelStartupService {
       messageRaw.messageType = 'documentMessage';
     }
 
+    let mediaMeta: { type: string; fileName: string; mimetype: string } | null = null;
+    if (this.configService.get<S3>('S3').ENABLE) {
+      try {
+        let buffer: Buffer | null = null;
+        if (file?.buffer) {
+          buffer = file.buffer;
+        } else if (data?.media && isBase64(data.media)) {
+          buffer = Buffer.from(data.media, 'base64');
+        } else if (data?.media && isURL(data.media)) {
+          buffer = await this.downloadFile(data.media);
+        }
+
+        if (buffer) {
+          const fileName = data.fileName || file?.originalname || `file.${mediaType}`;
+          const mimetype = file?.mimetype || (mimeTypes.lookup(fileName) as string) || 'application/octet-stream';
+          const fullName = join(
+            `${this.instance.id}`,
+            messageRaw.key.remoteJid,
+            mediaType,
+            `${messageRaw.key.id}_${fileName}`,
+          );
+
+          await s3Service.uploadFile(fullName, buffer, buffer.length, { 'Content-Type': mimetype });
+
+          messageRaw.message.mediaUrl = await s3Service.getObjectUrl(fullName);
+          mediaMeta = { type: mediaType, fileName: fullName, mimetype };
+
+          if (this.configService.get<Openai>('OPENAI').ENABLED) {
+            if (mediaType === 'audio') {
+              const transcription = await this.openaiService.speechToTextSystem(messageRaw, this);
+              if (transcription) {
+                messageRaw.message.speechToText = `[audio] ${transcription}`;
+              }
+            } else if (mediaType === 'image') {
+              const captionText = await this.openaiService.describeImageSystem(messageRaw, this);
+              if (captionText) {
+                messageRaw.message.imageCaption = captionText;
+              }
+            } else if (mediaType === 'document') {
+              const pdfText = await this.openaiService.extractPdfTextSystem(messageRaw, this);
+              if (pdfText) {
+                messageRaw.message.documentText = `[pdf] ${pdfText}`;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        this.logger.error(['Error on upload file to minio', error?.message]);
+      }
+    }
+
     this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
-
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && !isIntegration) {
-      this.chatwootService.eventWhatsapp(
-        Events.SEND_MESSAGE,
-        { instanceName: this.instance.name, instanceId: this.instanceId },
-        messageRaw,
-      );
+    if (this.shouldSaveMessages()) {
+      await this.persistMessage(messageRaw, mediaMeta);
     }
-
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && isIntegration) {
-      await chatbotController.emit({
-        instance: { instanceName: this.instance.name, instanceId: this.instanceId },
-        remoteJid: messageRaw.key.remoteJid,
-        msg: messageRaw,
-        pushName: messageRaw.pushName,
-      });
-    }
-
-    await this.prismaRepository.message.create({ data: messageRaw });
     await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
     return messageRaw;
   }
 
   public async audioWhatsapp(data: SendAudioDto, file?: any, isIntegration = false) {
+    void isIntegration;
     const chatId = this.normalizeChatId(data.number);
     await this.ensureBotProfileName();
     await this.sendChatAction(chatId, 'record_voice');
@@ -649,27 +725,52 @@ export class TelegramBotStartupService extends ChannelStartupService {
       status: status[1],
       source: 'unknown',
     };
+    this.addAuthor(messageRaw, data?.author);
 
     this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
 
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && !isIntegration) {
-      this.chatwootService.eventWhatsapp(
-        Events.SEND_MESSAGE,
-        { instanceName: this.instance.name, instanceId: this.instanceId },
-        messageRaw,
-      );
+    let mediaMeta: { type: string; fileName: string; mimetype: string } | null = null;
+    if (this.configService.get<S3>('S3').ENABLE) {
+      try {
+        let buffer: Buffer | null = null;
+        if (file?.buffer) {
+          buffer = file.buffer;
+        } else if (data?.audio && isBase64(data.audio)) {
+          buffer = Buffer.from(data.audio, 'base64');
+        } else if (data?.audio && isURL(data.audio)) {
+          buffer = await this.downloadFile(data.audio);
+        }
+
+        if (buffer) {
+          const fileName = file?.originalname || 'voice.ogg';
+          const mimetype = file?.mimetype || 'audio/ogg';
+          const fullName = join(
+            `${this.instance.id}`,
+            messageRaw.key.remoteJid,
+            'audio',
+            `${messageRaw.key.id}_${fileName}`,
+          );
+
+          await s3Service.uploadFile(fullName, buffer, buffer.length, { 'Content-Type': mimetype });
+
+          messageRaw.message.mediaUrl = await s3Service.getObjectUrl(fullName);
+          mediaMeta = { type: 'audio', fileName: fullName, mimetype };
+
+          if (this.configService.get<Openai>('OPENAI').ENABLED) {
+            const transcription = await this.openaiService.speechToTextSystem(messageRaw, this);
+            if (transcription) {
+              messageRaw.message.speechToText = `[audio] ${transcription}`;
+            }
+          }
+        }
+      } catch (error) {
+        this.logger.error(['Error on upload file to minio', error?.message]);
+      }
     }
 
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled && isIntegration) {
-      await chatbotController.emit({
-        instance: { instanceName: this.instance.name, instanceId: this.instanceId },
-        remoteJid: messageRaw.key.remoteJid,
-        msg: messageRaw,
-        pushName: messageRaw.pushName,
-      });
+    if (this.shouldSaveMessages()) {
+      await this.persistMessage(messageRaw, mediaMeta);
     }
-
-    await this.prismaRepository.message.create({ data: messageRaw });
     await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
     return messageRaw;
@@ -708,18 +809,52 @@ export class TelegramBotStartupService extends ChannelStartupService {
       status: status[1],
       source: 'unknown',
     };
+    this.addAuthor(messageRaw, data?.author);
 
     this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
 
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-      this.chatwootService.eventWhatsapp(
-        Events.SEND_MESSAGE,
-        { instanceName: this.instance.name, instanceId: this.instanceId },
-        messageRaw,
-      );
+    let mediaMeta: { type: string; fileName: string; mimetype: string } | null = null;
+    if (this.configService.get<S3>('S3').ENABLE) {
+      try {
+        let buffer: Buffer | null = null;
+        if (file?.buffer) {
+          buffer = file.buffer;
+        } else if (data?.video && isBase64(data.video)) {
+          buffer = Buffer.from(data.video, 'base64');
+        } else if (data?.video && isURL(data.video)) {
+          buffer = await this.downloadFile(data.video);
+        }
+
+        if (buffer) {
+          const fileName = file?.originalname || 'video_note.mp4';
+          const mimetype = file?.mimetype || 'video/mp4';
+          const fullName = join(
+            `${this.instance.id}`,
+            messageRaw.key.remoteJid,
+            'ptv',
+            `${messageRaw.key.id}_${fileName}`,
+          );
+
+          await s3Service.uploadFile(fullName, buffer, buffer.length, { 'Content-Type': mimetype });
+
+          messageRaw.message.mediaUrl = await s3Service.getObjectUrl(fullName);
+          mediaMeta = { type: 'ptv', fileName: fullName, mimetype };
+
+          if (this.configService.get<Openai>('OPENAI').ENABLED) {
+            const transcription = await this.openaiService.speechToTextSystem(messageRaw, this);
+            if (transcription) {
+              messageRaw.message.speechToText = `[audio] ${transcription}`;
+            }
+          }
+        }
+      } catch (error) {
+        this.logger.error(['Error on upload file to minio', error?.message]);
+      }
     }
 
-    await this.prismaRepository.message.create({ data: messageRaw });
+    if (this.shouldSaveMessages()) {
+      await this.persistMessage(messageRaw, mediaMeta);
+    }
     await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
     return messageRaw;
@@ -750,18 +885,13 @@ export class TelegramBotStartupService extends ChannelStartupService {
       status: status[1],
       source: 'unknown',
     };
+    this.addAuthor(messageRaw, data?.author);
 
     this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
 
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-      this.chatwootService.eventWhatsapp(
-        Events.SEND_MESSAGE,
-        { instanceName: this.instance.name, instanceId: this.instanceId },
-        messageRaw,
-      );
+    if (this.shouldSaveMessages()) {
+      await this.persistMessage(messageRaw);
     }
-
-    await this.prismaRepository.message.create({ data: messageRaw });
     await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
     return messageRaw;
@@ -789,18 +919,13 @@ export class TelegramBotStartupService extends ChannelStartupService {
       status: status[1],
       source: 'unknown',
     };
+    this.addAuthor(messageRaw, data?.author);
 
     this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
 
-    if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
-      this.chatwootService.eventWhatsapp(
-        Events.SEND_MESSAGE,
-        { instanceName: this.instance.name, instanceId: this.instanceId },
-        messageRaw,
-      );
+    if (this.shouldSaveMessages()) {
+      await this.persistMessage(messageRaw);
     }
-
-    await this.prismaRepository.message.create({ data: messageRaw });
     await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
     return messageRaw;
@@ -836,9 +961,12 @@ export class TelegramBotStartupService extends ChannelStartupService {
         status: status[1],
         source: 'unknown',
       };
+      this.addAuthor(messageRaw, _data?.author);
 
       this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
-      await this.prismaRepository.message.create({ data: messageRaw });
+      if (this.shouldSaveMessages()) {
+        await this.persistMessage(messageRaw);
+      }
       await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
       return messageRaw;
@@ -875,9 +1003,12 @@ export class TelegramBotStartupService extends ChannelStartupService {
       status: status[1],
       source: 'unknown',
     };
+    this.addAuthor(messageRaw, _data?.author);
 
     this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
-    await this.prismaRepository.message.create({ data: messageRaw });
+    if (this.shouldSaveMessages()) {
+      await this.persistMessage(messageRaw);
+    }
     await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
     return messageRaw;
@@ -916,8 +1047,22 @@ export class TelegramBotStartupService extends ChannelStartupService {
 
     const media: any[] = [];
     let attachIndex = 0;
+    const mediaGroupItems: Array<{
+      type: string;
+      mediaUrl?: string;
+      fileName?: string;
+      mimetype?: string;
+      imageCaption?: string;
+      speechToText?: string;
+      documentText?: string;
+    }> = [];
 
     for (const item of data.medias) {
+      let buffer: Buffer | null = null;
+      let mediaUrl: string | undefined;
+      const fileName = item.fileName || `file.${item.type}`;
+      const mimetype = (mimeTypes.lookup(fileName) as string) || 'application/octet-stream';
+
       if (isURL(item.media)) {
         media.push({
           type: item.type,
@@ -925,12 +1070,10 @@ export class TelegramBotStartupService extends ChannelStartupService {
           caption: item.caption,
           parse_mode: item.parseMode,
         });
-        continue;
-      }
-      if (isBase64(item.media)) {
-        const buffer = Buffer.from(item.media, 'base64');
+        mediaUrl = item.media;
+      } else if (isBase64(item.media)) {
+        buffer = Buffer.from(item.media, 'base64');
         const fieldName = `file${attachIndex}`;
-        const fileName = item.fileName || `${fieldName}.bin`;
         form.append(fieldName, buffer, { filename: fileName });
         media.push({
           type: item.type,
@@ -939,9 +1082,66 @@ export class TelegramBotStartupService extends ChannelStartupService {
           parse_mode: item.parseMode,
         });
         attachIndex += 1;
-        continue;
+      } else {
+        throw new BadRequestException('Media must be a url or base64');
       }
-      throw new BadRequestException('Media must be a url or base64');
+
+      if (this.configService.get<S3>('S3').ENABLE) {
+        try {
+          if (!buffer && mediaUrl) {
+            buffer = await this.downloadFile(mediaUrl);
+          }
+
+          if (buffer) {
+            const fullName = join(
+              `${this.instance.id}`,
+              this.normalizeRemoteJid(chatId),
+              'media_group',
+              `${Date.now()}_${fileName}`,
+            );
+
+            await s3Service.uploadFile(fullName, buffer, buffer.length, { 'Content-Type': mimetype });
+            mediaUrl = await s3Service.getObjectUrl(fullName);
+
+            const recognitionPayload = { message: { mediaUrl, mimetype } };
+
+            let imageCaption: string | undefined;
+            let speechToText: string | undefined;
+            let documentText: string | undefined;
+
+            if (this.configService.get<Openai>('OPENAI').ENABLED) {
+              if (item.type === 'audio') {
+                const transcription = await this.openaiService.speechToTextSystem(recognitionPayload, this);
+                if (transcription) {
+                  speechToText = `[audio] ${transcription}`;
+                }
+              } else if (item.type === 'photo') {
+                const caption = await this.openaiService.describeImageSystem(recognitionPayload, this);
+                if (caption) {
+                  imageCaption = caption;
+                }
+              } else if (item.type === 'document') {
+                const pdfText = await this.openaiService.extractPdfTextSystem(recognitionPayload, this);
+                if (pdfText) {
+                  documentText = `[pdf] ${pdfText}`;
+                }
+              }
+            }
+
+            mediaGroupItems.push({
+              type: item.type,
+              mediaUrl,
+              fileName: fullName,
+              mimetype,
+              imageCaption,
+              speechToText,
+              documentText,
+            });
+          }
+        } catch (error) {
+          this.logger.error(['Error on upload file to minio', error?.message]);
+        }
+      }
     }
 
     form.append('media', JSON.stringify(media));
@@ -955,16 +1155,19 @@ export class TelegramBotStartupService extends ChannelStartupService {
         remoteJid: this.normalizeRemoteJid(chatId),
       },
       pushName: this.botProfileName || this.instance.profileName || undefined,
-      message: { conversation: '[media_group]' },
+      message: { conversation: '[media_group]', mediaGroup: mediaGroupItems },
       messageType: 'conversation',
       messageTimestamp: result?.result?.[0]?.date || Math.round(Date.now() / 1000),
       instanceId: this.instanceId,
       status: status[1],
       source: 'unknown',
     };
+    this.addAuthor(messageRaw, data?.author);
 
     this.sendDataWebhook(Events.SEND_MESSAGE, messageRaw);
-    await this.prismaRepository.message.create({ data: messageRaw });
+    if (this.shouldSaveMessages()) {
+      await this.persistMessage(messageRaw);
+    }
     await this.ensureChat(messageRaw.key.remoteJid, this.botProfileName || null, true);
 
     return messageRaw;

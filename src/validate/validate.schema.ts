@@ -3,6 +3,7 @@ export * from './auth.schema';
 export * from './business.schema';
 export * from './chat.schema';
 export * from './company.schema';
+export * from './credentials.schema';
 export * from './group.schema';
 export * from './instance.schema';
 export * from './label.schema';

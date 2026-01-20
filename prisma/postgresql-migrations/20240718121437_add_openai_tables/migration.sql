@@ -1,6 +1,3 @@
--- AlterTable
-ALTER TABLE "Message" ADD COLUMN     "openaiSessionId" TEXT;
-
 -- CreateTable
 CREATE TABLE "OpenaiCreds" (
     "id" TEXT NOT NULL,
@@ -43,21 +40,6 @@ CREATE TABLE "OpenaiBot" (
 );
 
 -- CreateTable
-CREATE TABLE "OpenaiSession" (
-    "id" TEXT NOT NULL,
-    "sessionId" VARCHAR(255) NOT NULL,
-    "remoteJid" VARCHAR(100) NOT NULL,
-    "status" "TypebotSessionStatus" NOT NULL,
-    "awaitUser" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP NOT NULL,
-    "openaiBotId" TEXT NOT NULL,
-    "instanceId" TEXT NOT NULL,
-
-    CONSTRAINT "OpenaiSession_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "OpenaiSetting" (
     "id" TEXT NOT NULL,
     "expire" INTEGER DEFAULT 0,
@@ -91,9 +73,6 @@ CREATE UNIQUE INDEX "OpenaiBot_assistantId_key" ON "OpenaiBot"("assistantId");
 CREATE UNIQUE INDEX "OpenaiSetting_instanceId_key" ON "OpenaiSetting"("instanceId");
 
 -- AddForeignKey
-ALTER TABLE "Message" ADD CONSTRAINT "Message_openaiSessionId_fkey" FOREIGN KEY ("openaiSessionId") REFERENCES "OpenaiSession"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "OpenaiCreds" ADD CONSTRAINT "OpenaiCreds_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -101,12 +80,6 @@ ALTER TABLE "OpenaiBot" ADD CONSTRAINT "OpenaiBot_openaiCredsId_fkey" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "OpenaiBot" ADD CONSTRAINT "OpenaiBot_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "OpenaiSession" ADD CONSTRAINT "OpenaiSession_openaiBotId_fkey" FOREIGN KEY ("openaiBotId") REFERENCES "OpenaiBot"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "OpenaiSession" ADD CONSTRAINT "OpenaiSession_instanceId_fkey" FOREIGN KEY ("instanceId") REFERENCES "Instance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OpenaiSetting" ADD CONSTRAINT "OpenaiSetting_openaiCredsId_fkey" FOREIGN KEY ("openaiCredsId") REFERENCES "OpenaiCreds"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -22,7 +22,6 @@
 
 Evolution API began as a WhatsApp controller API based on [CodeChat](https://github.com/code-chat-br/whatsapp-api), which in turn implemented the [Baileys](https://github.com/WhiskeySockets/Baileys) library. While originally focused on WhatsApp, Evolution API has grown into a comprehensive platform supporting multiple messaging services and integrations. We continue to acknowledge CodeChat for laying the groundwork.
 
-Today, Evolution API is not limited to WhatsApp. It integrates with various platforms such as Typebot, Chatwoot, Dify, and OpenAI, offering a broad array of functionalities beyond messaging. Evolution API supports both the Baileys-based WhatsApp API and the official WhatsApp Business API, with upcoming support for Instagram and Messenger.
 
 ## Looking for a Lightweight Version?
 For those who need a more streamlined and performance-optimized version, check out [Evolution API Lite](https://github.com/EvolutionAPI/evolution-api-lite). It's designed specifically for microservices, focusing solely on connectivity without integrations or audio conversion features. Ideal for environments that prioritize simplicity and efficiency.
@@ -46,11 +45,6 @@ Evolution API supports multiple types of connections to WhatsApp, enabling flexi
 
 Evolution API supports various integrations to enhance its functionality. Below is a list of available integrations and their uses:
 
-- [Typebot](https://typebot.io/):
-  - Build conversational bots using Typebot, integrated directly into Evolution with trigger management.
-
-- [Chatwoot](https://www.chatwoot.com/):
-  - Direct integration with Chatwoot for handling customer service for your business.
 
 - [RabbitMQ](https://www.rabbitmq.com/):
   - Receive events from the Evolution API via RabbitMQ.
@@ -63,9 +57,6 @@ Evolution API supports various integrations to enhance its functionality. Below 
 
 - [Socket.io](https://socket.io/):
   - Receive events from the Evolution API via WebSocket.
-
-- [Dify](https://dify.ai/):
-  - Integrate your Evolution API directly with Dify AI for seamless trigger management and multiple agents.
 
 - [OpenAI](https://openai.com/):
   - Integrate your Evolution API with OpenAI for AI capabilities, including audio-to-text conversion, available across all Evolution integrations.

@@ -11,11 +11,10 @@ async function apikey(req: Request, _: Response, next: NextFunction) {
   const key = req.get('apikey');
 
   if (!key) {
+    if (req.originalUrl.includes('/instance/create') || req.originalUrl.includes('/instance/fetchInstances')) {
+      throw new ForbiddenException('Missing global api key', 'The global api key must be set');
+    }
     throw new UnauthorizedException();
-  }
-
-  if ((req.originalUrl.includes('/instance/create') || req.originalUrl.includes('/instance/fetchInstances')) && !key) {
-    throw new ForbiddenException('Missing global api key', 'The global api key must be set');
   }
   const param = req.params as unknown as InstanceDto;
 
@@ -67,6 +66,7 @@ async function apikey(req: Request, _: Response, next: NextFunction) {
 
       if (instance?.token && instance.token === key) {
         req.companyId = instance.companyId || undefined;
+        req.instanceId = instance.id;
         return next();
       }
     }
